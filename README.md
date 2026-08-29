@@ -82,26 +82,14 @@ push 完網站會自動重新發布。
 
 ### 其他選項
 
-- **直接傳檔案**：`out/index.html` 是自包的單一檔案，用 LINE / Email 傳過去，
+- **直接傳檔案（$0）**：`out/index.html` 是自包的單一檔案，用 LINE / Email 傳過去，
   對方瀏覽器開就能看，連網路都不用。缺點是每次更新要重傳。
-- **AWS（S3 + CloudFront）**：`awscli` 已裝好，設定憑證後跑 `deploy_s3.sh`：
-
-  ```bash
-  aws configure                  # 填 IAM 的 Access Key ID / Secret
-  ./deploy_s3.sh --cloudfront    # S3 + CloudFront，有 HTTPS
-  ```
-
-  不加 `--cloudfront` 就只開 S3 靜態網站，網址是
-  `http://house591-mrt-board.s3-website-ap-northeast-1.amazonaws.com`
-  ——**只有 HTTP，瀏覽器會標示不安全**。
-
-  加了 `--cloudfront` 會在前面掛一層 CDN，拿到 `https://xxxx.cloudfront.net` 的網址，
-  自動把 HTTP 轉向 HTTPS 並開啟壓縮。第一次建立要等 5～15 分鐘生效。
-  腳本可重複執行：bucket 和 distribution 都會沿用既有的，並自動清 CloudFront 快取。
-
-  費用：這種流量下 S3 幾乎免費，CloudFront 每月有 1TB 免費額度，實務上也是接近零。
-- **Vercel**：這台電腦沒裝 Node，要先 `brew install node`，再
-  `npx vercel deploy out --prod`（第一次會要你登入 Vercel）。`out/vercel.json` 已備好。
+- **AWS（S3 + CloudFront）—— 會產生費用，這個用途不建議**：
+  `awscli` 已裝好，`deploy_s3.sh` 也寫好了（`./deploy_s3.sh --cloudfront` 可拿到 HTTPS 網址）。
+  但 AWS **必須綁信用卡**，帳單金額雖然小卻不是零，設定錯了還可能被灌流量。
+  純粹分享一頁靜態網站沒有理由付這個錢，腳本留著當備案就好。
+- **Vercel**：免費方案可用，但這台電腦沒裝 Node，要先 `brew install node`，
+  再 `npx vercel deploy out --prod`（第一次會要你登入）。`out/vercel.json` 已備好。
 
 > `docs/` 裡放了 `robots.txt` 與 `noindex`，網址是公開的但不會被搜尋引擎收錄。
 
