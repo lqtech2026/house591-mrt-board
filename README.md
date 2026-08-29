@@ -51,29 +51,41 @@ data/snapshot.json      上次結果，用來比對新上架 / 降價 / 已下�
 - **一樓店面含 B1 的物件**，591 的樓層欄會顯示成 `B1/7F`，那是「B1＋1樓」的店面，不是地下室店面，屬正常結果。
 - **成交價請以內政部實價登錄為準**，591 上是開價。
 
-## 部署到 Vercel（給夥伴看）
+## 給夥伴看（免登入的公開網址）
 
-`out/index.html` 是完整的獨立網頁，把 `out/` 整個目錄當靜態網站丟上去就會動，裡面已附 `vercel.json`。
-
-這台電腦目前**沒有裝 Node/npm**，所以 Vercel CLI 不能直接用。兩條路：
-
-**A. 接 GitHub（推薦，之後更新只要 push）**
+`docs/index.html` 是完整的獨立網頁，**GitHub Pages 直接指到 `docs/` 就會動**。
+本機 repo 已經 commit 好了，剩下兩步：
 
 ```bash
-cd ~/Documents/Github/house591 && git init && git add -A && git commit -m "591 捷運沿線置產工具"
+cd ~/Documents/Github/house591 && gh repo create house591-mrt-board --public --source=. --push
 ```
-
-推到 GitHub 後，在 Vercel → Add New Project → 匯入這個 repo，Root Directory 選 `out`，Framework 選 Other，就完成了。以後每次跑完 `make_share_page.py` 再 commit + push，網站就會自動更新。
-
-**B. 裝 Node 後用 CLI**
 
 ```bash
-brew install node && npx vercel deploy ~/Documents/Github/house591/out --prod
+gh api -X POST repos/lqtech2026/house591-mrt-board/pages -f "source[branch]=main" -f "source[path]=/docs"
 ```
 
-第一次會開瀏覽器要你登入 Vercel。
+約一分鐘後網址就會是：
+**https://lqtech2026.github.io/house591-mrt-board/**
 
-> 注意：Vercel 的正式網址預設是**公開**的，任何拿到網址的人都看得到。若只想給特定人看，用 Vercel 的 Deployment Protection，或改用 Claude Artifact 的分享連結。
+任何人點開就能看，不用登入、不用裝東西。（第二步也可以在 repo 的
+Settings → Pages → Source 選 `main` + `/docs` 用點的。）
+
+### 之後更新
+
+```bash
+cd ~/Documents/Github/house591 && python3 house591.py && python3 make_share_page.py && git add -A && git commit -m "update" && git push
+```
+
+push 完網站會自動重新發布。
+
+### 其他選項
+
+- **直接傳檔案**：`out/index.html` 是自包的單一檔案，用 LINE / Email 傳過去，
+  對方瀏覽器開就能看，連網路都不用。缺點是每次更新要重傳。
+- **Vercel**：這台電腦沒裝 Node，要先 `brew install node`，再
+  `npx vercel deploy out --prod`（第一次會要你登入 Vercel）。`out/vercel.json` 已備好。
+
+> `docs/` 裡放了 `robots.txt` 與 `noindex`，網址是公開的但不會被搜尋引擎收錄。
 
 ## 資料來源
 
