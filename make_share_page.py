@@ -161,10 +161,14 @@ def render(data, stamp, iso=""):
     html = html.replace("__COUNT__", str(len(data["items"])))
     html = html.replace("__STATIONS__", str(len(data["board"])))
     html = html.replace("__STAMP__", stamp)
+
+    org = (cfg.get("org") or "").strip()
+    html = html.replace("__ORGTITLE__", (org + "置產看板") if org else "捷運沿線置產看板")
+    html = html.replace("__EYEBROW__", (org + " · 591 台北市") if org else "591 · 台北市")
     return html
 
 
-PAGE = r"""<title>捷運沿線置產看板</title>
+PAGE = r"""<title>__ORGTITLE__</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700&family=Noto+Sans+TC:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
@@ -342,6 +346,7 @@ td.r .pill.rng{margin-left:6px;font-weight:400}
   display:flex;gap:8px;align-items:center;max-width:1180px;margin:0 auto 10px;
   font-size:13px;color:var(--mut);
 }
+.favbar[hidden]{display:none}   /* 作者樣式的 display 會壓過 hidden 屬性，要明寫 */
 .linkbtn{
   font:inherit;font-size:13px;padding:4px 10px;border-radius:7px;
   border:1px solid var(--line);background:var(--surface);color:var(--ink-2);cursor:pointer;
@@ -369,20 +374,73 @@ td.ti a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 :root[data-theme="dark"] .pill.new{color:#5eead4}
 :root[data-theme="dark"] .pill.down{color:#fca5a5}
 .empty{padding:40px;text-align:center;color:var(--mut)}
+
+/* ---- 手機：表格換成卡片 ---- */
+#cards{display:none;max-width:1180px;margin:0 auto;gap:10px}
+#more{display:none;margin:14px auto 0;padding:9px 22px;font-size:14px}
+@media (max-width:720px){#more:not([hidden]){display:block}}
+.card2{
+  background:var(--surface);border:1px solid var(--line);border-radius:12px;
+  padding:12px 14px;display:grid;gap:7px;cursor:pointer;box-shadow:var(--shadow);
+}
+.card2:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.c-top{display:flex;align-items:center;gap:8px}
+.c-stn{display:flex;align-items:center;gap:6px;font-weight:500;font-size:14px}
+.c-dist{color:var(--mut);font-size:12.5px;font-variant-numeric:tabular-nums}
+.c-top .star{margin-left:auto;font-size:17px}
+.c-ti{font-size:14px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;
+  -webkit-box-orient:vertical;overflow:hidden}
+.c-price{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.c-price b{font-size:21px;font-weight:600;font-family:"IBM Plex Mono",monospace;
+  font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.c-price .u{color:var(--ink-2);font-size:13px;font-variant-numeric:tabular-nums}
+.c-meta{color:var(--mut);font-size:12.5px;display:flex;flex-wrap:wrap;gap:4px 10px}
+.c-tags{display:flex;flex-wrap:wrap;gap:4px}
+.sortbar{display:none;gap:8px;align-items:center;max-width:1180px;margin:0 auto 12px}
+.sortbar select{
+  font:inherit;font-size:13.5px;padding:6px 10px;border-radius:8px;flex:1;
+  border:1px solid var(--line);background:var(--surface);color:var(--ink);
+}
+.sortbar button{
+  font:inherit;font-size:13.5px;padding:6px 12px;border-radius:8px;
+  border:1px solid var(--line);background:var(--surface);color:var(--ink-2);cursor:pointer;
+}
+@media (max-width:720px){
+  .wrap{padding:24px 14px 60px}
+  h1{font-size:clamp(24px,7vw,32px)}
+  .lede{font-size:14.5px}
+  .meta{gap:6px 16px;font-size:12.5px}
+  h2{font-size:16px;margin-top:30px}
+  .tablebox{display:none}
+  #cards{display:grid}
+  .sortbar{display:flex}
+  .toolbar{flex-wrap:wrap}
+  #q{max-width:none;min-width:0;width:100%;order:3}
+  .shown{margin-left:0;order:2}
+  .favbar{flex-wrap:wrap}
+}
 footer{margin-top:36px;font-size:12.5px;color:var(--mut);line-height:1.7}
 @media (max-width:820px){
   .brow{grid-template-columns:112px 44px 92px 92px;gap:10px;padding:10px 14px}
   .spread,.brow>:nth-child(5){display:none}
   .scaleline{display:none}
 }
+/* 這段必須排在 820px 之後：同權重時後面的規則勝出 */
+@media (max-width:720px){
+  .brow{grid-template-columns:minmax(0,1fr) 30px 66px 62px;gap:6px;padding:10px 10px;font-size:12.5px}
+  .board .bhead{font-size:10px;letter-spacing:.03em}
+  .val small{display:none}          /* 單位移到上面的說明，省下寬度 */
+  .stn{gap:5px;min-width:0}
+  .dot{width:7px;height:7px}
+}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 
 <div class="wrap">
 <header>
-  <p class="eyebrow">591 · 台北市</p>
+  <p class="eyebrow">__EYEBROW__</p>
   <h1>捷運沿線置產看板</h1>
-  <p class="lede">__CATS__ ｜ __COND__。預設把新上架排在最前面。點 ☆ 收進最愛；點任一列開啟該物件的 591 頁面；點左側站名可只看該站，欄位標題可排序。</p>
+  <p class="lede">__CATS__ ｜ __COND__。預設把新上架排在最前面。點 ☆ 收進最愛；點任一列（手機是整張卡片）開啟該物件的 591 頁面；點左側站名可只看該站，欄位標題可排序。</p>
   <p class="meta">
     <span><b>__COUNT__</b> 間物件</span>
     <span><b>__STATIONS__</b> 個捷運站</span>
@@ -391,7 +449,8 @@ footer{margin-top:36px;font-size:12.5px;color:var(--mut);line-height:1.7}
 </header>
 
 <h2>各站價格帶</h2>
-<p class="hint">橫條是該站單價的最低到最高，粗線是中位數。顏色是捷運路線色。</p>
+<p class="hint">總價單位萬元、單價單位萬元/坪。顏色是捷運路線色，
+橫條（寬螢幕才顯示）是該站單價的最低到最高，粗線是中位數。</p>
 <div class="board" id="board"></div>
 <div class="scaleline"><span id="s0"></span><span id="s1"></span></div>
 
@@ -407,6 +466,19 @@ footer{margin-top:36px;font-size:12.5px;color:var(--mut);line-height:1.7}
   <button class="linkbtn" id="favshare">複製最愛的連結</button>
   <button class="linkbtn" id="favclear">清空最愛</button>
 </div>
+<div class="sortbar">
+  <select id="msort" aria-label="排序方式">
+    <option value="sv">狀態（新上架優先）</option>
+    <option value="p">總價</option>
+    <option value="u">單價</option>
+    <option value="a">坪數</option>
+    <option value="d">離站距離</option>
+    <option value="s">捷運站</option>
+  </select>
+  <button id="mdir" aria-label="切換排序方向">高→低</button>
+</div>
+<div id="cards"></div>
+<button class="linkbtn" id="more" hidden>顯示更多</button>
 <div class="tablebox"><table id="tbl">
   <thead><tr>
     <th class="favcol" title="我的最愛">★</th>
@@ -542,7 +614,54 @@ document.querySelectorAll('#tbl thead th').forEach(th => th.addEventListener('cl
 }));
 
 /* ---------- 明細 ---------- */
-function draw() {
+const MQ = matchMedia('(max-width: 720px)');
+const PAGE_SIZE = 50;          // 手機一次先畫這麼多張，其餘按「顯示更多」
+let cardLimit = PAGE_SIZE, lastRows = [];
+
+const has = v => v != null && v !== '' && v !== '-' && v !== '—';
+
+function starHTML(i) {
+  const on = !!FAVS[i.k];
+  return `<button class="star" data-fav="${esc(i.k)}" aria-pressed="${on}"
+    aria-label="${on ? '從最愛移除' : '加入最愛'}"
+    title="${on ? '從最愛移除' : '加入最愛'}">${on ? '★' : '☆'}</button>`;
+}
+
+function tagsHTML(i) {
+  return (i.new ? '<span class="pill new">新上架</span>' : '')
+    + (i.chg ? `<span class="pill down">${esc(i.chg)}</span>` : '')
+    + (i.dup > 1 ? `<span class="pill">${i.dup} 家</span>` : '')
+    + (i.gone ? '<span class="pill gone">已不在目前名單</span>' : '');
+}
+
+/* 手機用卡片：14 欄的表格在 375px 螢幕要橫向滑 5 倍才看得完一列 */
+function renderCards(rows) {
+  document.getElementById('cards').innerHTML = rows.map(i => `
+    <div class="card2" tabindex="0" role="link" data-url="${esc(i.url)}"
+         aria-label="在 591 開啟：${esc(i.ti)}">
+      <div class="c-top">
+        <span class="c-stn"><i class="sdot" style="background:${colorOf(i.s)}"></i>${esc(i.s)}</span>
+        <span class="c-dist">${i.d == null ? '' : i.d + ' m'}</span>
+        ${starHTML(i)}
+      </div>
+      ${tagsHTML(i) ? `<div class="c-tags">${tagsHTML(i)}</div>` : ''}
+      <div class="c-ti">${esc(i.ti)}</div>
+      <div class="c-price">
+        <b>${fmt(i.p)}</b><span class="u">萬</span>
+        ${i.hi ? `<span class="pill rng">最高 ${fmt(i.hi)}</span>` : ''}
+        <span class="u">${fmt(i.u)} 萬/坪 · ${fmt(i.a)} 坪</span>
+      </div>
+      <div class="c-meta">${
+        [esc(i.c) + (has(i.t) ? ' · ' + esc(i.t) : ''),
+         has(i.fl) ? esc(i.fl) : '',
+         has(i.ag) ? esc(i.ag) : '',
+         esc(i.dt) + (has(i.ad) ? ' ' + esc(i.ad) : '')]
+        .filter(Boolean).map(x => `<span>${x}</span>`).join('')}</div>
+    </div>`).join('');
+}
+
+function draw(keepLimit) {
+  if (!keepLimit) cardLimit = PAGE_SIZE;
   let rows = (state.favOnly ? favRows() : DATA.items).filter(i =>
     (!state.station || i.s === state.station) &&
     (!state.cat || i.c === state.cat) &&
@@ -555,12 +674,19 @@ function draw() {
     return String(x).localeCompare(String(y), 'zh-Hant') * sgn;
   });
 
-  document.getElementById('tb').innerHTML = rows.map(i => `<tr tabindex="0" role="link"
+  lastRows = rows;
+  const more = document.getElementById('more');
+  if (MQ.matches) {
+    renderCards(rows.slice(0, cardLimit));
+    const rest = rows.length - cardLimit;
+    more.hidden = rest <= 0;
+    if (rest > 0) more.textContent = `顯示更多（還有 ${rest} 間）`;
+  } else {
+    more.hidden = true;
+  }
+  if (!MQ.matches) document.getElementById('tb').innerHTML = rows.map(i => `<tr tabindex="0" role="link"
     data-url="${esc(i.url)}" aria-label="在 591 開啟：${esc(i.ti)}" title="點一下在 591 開啟">
-    <td class="favcol"><button class="star" data-fav="${esc(i.k)}"
-      aria-pressed="${FAVS[i.k] ? 'true' : 'false'}"
-      aria-label="${FAVS[i.k] ? '從最愛移除' : '加入最愛'}"
-      title="${FAVS[i.k] ? '從最愛移除' : '加入最愛'}">${FAVS[i.k] ? '★' : '☆'}</button></td>
+    <td class="favcol">${starHTML(i)}</td>
     <td class="stat">${i.new ? '<span class="pill new">新上架</span>' : ''}${
       i.chg ? `<span class="pill down">${esc(i.chg)}</span>` : ''}</td>
     <td><i class="sdot" style="background:${colorOf(i.s)}"></i>${esc(i.s)}</td>
@@ -575,6 +701,7 @@ function draw() {
       i.dup > 1 ? `<span class="pill">${i.dup} 家</span>` : ''}${
       i.gone ? '<span class="pill gone">已不在目前名單</span>' : ''}</td>
   </tr>`).join('');
+  if (MQ.matches) document.getElementById('tb').innerHTML = '';
 
   const nFav = Object.keys(FAVS).length;
   document.getElementById('favchip').textContent = nFav ? `★ 只看最愛 (${nFav})` : '★ 只看最愛';
@@ -591,6 +718,7 @@ function draw() {
   document.getElementById('empty').hidden = rows.length > 0;
   document.getElementById('shown').textContent =
     '顯示 ' + rows.length + ' / ' + (state.favOnly ? nFav : DATA.items.length) + ' 間';
+  syncSortUI();
 }
 
 (function showAge() {
@@ -636,29 +764,50 @@ document.getElementById('favclear').addEventListener('click', function () {
   FAVS = {}; saveFavs(); draw();
 });
 
-/* 整列可點：不用滑到最右邊才找得到連結。
-   用事件委派，因為列會隨篩選與排序重畫。 */
+/* 手機的排序控制：卡片版沒有欄位標題可以點 */
+const msort = document.getElementById('msort'), mdir = document.getElementById('mdir');
+function syncSortUI() {
+  msort.value = ['sv', 'p', 'u', 'a', 'd', 's'].includes(state.sort) ? state.sort : 'sv';
+  mdir.textContent = state.asc ? '低→高' : '高→低';
+}
+msort.addEventListener('change', () => {
+  state.sort = msort.value;
+  state.asc = msort.value !== 'sv';        // 狀態預設高在前，其他預設低在前
+  draw();
+});
+mdir.addEventListener('click', () => { state.asc = !state.asc; draw(); });
+
+/* 換直/橫向或換裝置寬度時要重畫，卡片與表格才會跟著切換 */
+MQ.addEventListener('change', () => draw());
+document.getElementById('more').addEventListener('click', () => {
+  cardLimit += PAGE_SIZE;
+  draw(true);
+});
+
+/* 整列／整張卡片可點：不用滑到最右邊才找得到連結。
+   委派在 document 上，表格與卡片共用同一套處理。 */
 (function rowLinks() {
-  const tb = document.getElementById('tb');
-  const open = tr => {
-    const u = tr && tr.dataset.url;
+  const open = el => {
+    const u = el && el.dataset.url;
     if (u) window.open(u, '_blank', 'noopener');
   };
-  tb.addEventListener('click', e => {
+  document.addEventListener('click', e => {
     const star = e.target.closest('.star');
     if (star) { toggleFav(star.dataset.fav); return; }        // 星星自己處理，不要開 591
     if (e.target.closest('a')) return;                        // 標題本來就是連結
+    const row = e.target.closest('[data-url]');
+    if (!row) return;
     if (String(getSelection())) return;                       // 使用者在選字，不要跳走
-    open(e.target.closest('tr'));
+    open(row);
   });
-  tb.addEventListener('keydown', e => {
+  document.addEventListener('keydown', e => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     const star = e.target.closest('.star');
     if (star) { e.preventDefault(); toggleFav(star.dataset.fav); return; }
-    const tr = e.target.closest('tr');
-    if (!tr) return;
+    const row = e.target.closest('[data-url]');
+    if (!row) return;
     e.preventDefault();
-    open(tr);
+    open(row);
   });
 })();
 
