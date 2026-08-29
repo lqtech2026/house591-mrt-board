@@ -72,13 +72,28 @@ gh api -X POST repos/lqtech2026/house591-mrt-board/pages -f "source[branch]=main
 任何人點開就能看，不用登入、不用裝東西。（第二步也可以在 repo 的
 Settings → Pages → Source 選 `main` + `/docs` 用點的。）
 
-### 之後更新
+### 自動更新
+
+`.github/workflows/update.yml` 會**每天台北時間 09:00 自動重抓一次**並 push，
+網站跟著自動重新發布。公開 repo 的 GitHub Actions 不用錢。
+也可以到 repo 的 Actions 頁面按「Run workflow」手動觸發。
+
+> 注意：GitHub 對**超過 60 天沒有任何動靜**的 repo 會自動停用排程。
+> 平常有在 commit 就不會遇到；真的停了，到 Actions 頁面按一下重新啟用即可。
+
+### 手動更新
 
 ```bash
 cd ~/Documents/Github/house591 && python3 house591.py && python3 make_share_page.py && git add -A && git commit -m "update" && git push
 ```
 
 push 完網站會自動重新發布。
+
+### 資料新舊
+
+頁面上的網址**不會即時去撈 591** —— 那是靜態快照。標題列會顯示資料是幾小時前抓的，
+超過兩天會變色提醒。`data/snapshot.json` 有進版控，所以「新上架 / 降價」的比對
+在自動更新之間也能延續。
 
 ### 其他選項
 

@@ -112,10 +112,11 @@ def build(rows, stations_ref, cfg):
 
     cats = sorted({i["c"] for i in items if i["c"]})
     return {"items": items, "board": board, "cats": cats,
-            "uscale": [umin, umax], "cfg": cfg}
+            "uscale": [umin, umax], "cfg": cfg, "generated": ""}
 
 
-def render(data, stamp):
+def render(data, stamp, iso=""):
+    data = dict(data, generated=iso)
     payload = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
     cfg = data["cfg"]
     cond = "%s坪以上" % cfg.get("min_area_ping")
@@ -192,6 +193,10 @@ h1{
   font-size:13px;color:var(--mut);
 }
 .meta b{color:var(--ink);font-weight:600}
+#age{margin-left:6px}
+#age.stale{color:#b45309;font-weight:500}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) #age.stale{color:#f0a355}}
+:root[data-theme="dark"] #age.stale{color:#f0a355}
 
 h2{
   font-family:"Noto Serif TC",serif;font-size:19px;font-weight:700;
@@ -315,7 +320,7 @@ footer{margin-top:36px;font-size:12.5px;color:var(--mut);line-height:1.7}
   <p class="meta">
     <span><b>__COUNT__</b> 間物件</span>
     <span><b>__STATIONS__</b> 個捷運站</span>
-    <span>資料擷取 <b>__STAMP__</b></span>
+    <span>資料擷取 <b>__STAMP__</b><span id="age"></span></span>
   </p>
 </header>
 
@@ -452,6 +457,18 @@ function draw() {
   document.getElementById('shown').textContent = '顯示 ' + rows.length + ' / ' + DATA.items.length + ' 間';
 }
 
+(function showAge() {
+  const el = document.getElementById('age');
+  if (!el || !DATA.generated) return;
+  const hrs = (Date.now() - new Date(DATA.generated)) / 36e5;
+  if (hrs < 0) return;
+  const label = hrs < 1 ? '不到 1 小時前'
+    : hrs < 24 ? Math.round(hrs) + ' 小時前'
+    : Math.round(hrs / 24) + ' 天前';
+  el.textContent = '（' + label + '）';
+  if (hrs > 48) el.className = 'stale';   // 超過兩天就標色提醒資料可能過時
+})();
+
 drawBoard();
 document.querySelector('#tbl thead th[data-k="u"]').setAttribute('aria-sort', 'ascending');
 draw();
@@ -473,14 +490,18 @@ def main():
     stations_ref = json.load(open(os.path.join(BASE_DIR, "mrt_stations.json"), encoding="utf-8"))
     cfg = json.load(open(os.path.join(BASE_DIR, "config.json"), encoding="utf-8"))
 
-    stamp = os.path.basename(csv_path).replace("591_", "").replace(".csv", "")
+    raw_stamp = os.path.basename(csv_path).replace("591_", "").replace(".csv", "")
+    iso = ""
+    stamp = raw_stamp
     try:
-        stamp = datetime.strptime(stamp, "%Y%m%d_%H%M").strftime("%Y-%m-%d %H:%M")
+        dt = datetime.strptime(raw_stamp, "%Y%m%d_%H%M")
+        stamp = dt.strftime("%Y-%m-%d %H:%M")
+        iso = dt.astimezone().isoformat()   # 帶時區，訪客在別的時區也算得對
     except ValueError:
         pass
 
     data = build(rows, stations_ref, cfg)
-    html = render(data, stamp)
+    html = render(data, stamp, iso)
 
     # share.html 給 Claude Artifact 用(外層 html/head 由平台補)
     share = os.path.join(OUT_DIR, "share.html")
