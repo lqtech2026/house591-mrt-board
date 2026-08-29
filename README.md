@@ -39,6 +39,7 @@ python3 house591.py --stations   # 列出全台可用的捷運站名
 out/591_日期_時間.csv    Excel 直接開（UTF-8 BOM，不會亂碼）
 out/591_日期_時間.html   本機看的完整報告
 out/share.html          分享頁（給 Claude Artifact 用）
+docs/index.html         GitHub Pages 發布的版本
 out/index.html          分享頁（完整獨立網頁，給 Vercel 等靜態空間用）
 data/snapshot.json      上次結果，用來比對新上架 / 降價 / 已下架
 ```
@@ -72,28 +73,34 @@ gh api -X POST repos/lqtech2026/house591-mrt-board/pages -f "source[branch]=main
 任何人點開就能看，不用登入、不用裝東西。（第二步也可以在 repo 的
 Settings → Pages → Source 選 `main` + `/docs` 用點的。）
 
-### 自動更新
+### 自動更新（在你自己的 Mac 上排程）
 
-`.github/workflows/update.yml` 會**每天台北時間 09:00 自動重抓一次**並 push，
-網站跟著自動重新發布。公開 repo 的 GitHub Actions 不用錢。
-也可以到 repo 的 Actions 頁面按「Run workflow」手動觸發。
+**不能用 GitHub Actions** —— 實測過，591 會對資料中心 IP 直接回 `403 Forbidden`。
+抓取必須從家用網路出去，所以排程放在本機：
 
-> 注意：GitHub 對**超過 60 天沒有任何動靜**的 repo 會自動停用排程。
-> 平常有在 commit 就不會遇到；真的停了，到 Actions 頁面按一下重新啟用即可。
+```bash
+cp ~/Documents/Github/house591/com.jeff.house591.update.plist ~/Library/LaunchAgents/ && launchctl load ~/Library/LaunchAgents/com.jeff.house591.update.plist
+```
+
+每天 09:00 會自動重抓、重產分享頁、有變動才 commit + push，GitHub Pages 隨即更新。
+Mac 在 09:00 睡著的話，醒來後 launchd 會補跑。紀錄在 `logs/update.log`。
+
+停用：`launchctl unload ~/Library/LaunchAgents/com.jeff.house591.update.plist`
 
 ### 手動更新
 
 ```bash
-cd ~/Documents/Github/house591 && python3 house591.py && python3 make_share_page.py && git add -A && git commit -m "update" && git push
+cd ~/Documents/Github/house591 && ./update.sh
 ```
 
-push 完網站會自動重新發布。
+> `update.sh` 固定用 `/usr/bin/python3`。Homebrew 的 python3 帶 OpenSSL 3.x，
+> 會因為 591 憑證缺少 Subject Key Identifier 而連不上；系統 python3 的 LibreSSL 沒這問題。
 
 ### 資料新舊
 
-頁面上的網址**不會即時去撈 591** —— 那是靜態快照。標題列會顯示資料是幾小時前抓的，
-超過兩天會變色提醒。`data/snapshot.json` 有進版控，所以「新上架 / 降價」的比對
-在自動更新之間也能延續。
+網頁**不會即時去撈 591**，那是靜態快照。標題列會顯示資料是幾小時前抓的，
+超過兩天變色提醒。`data/snapshot.json` 有進版控，「新上架 / 降價」的比對能跨次延續；
+591 分頁結果會些微跳動，所以連續兩次沒出現才判定下架，避免每天冒出假異動。
 
 ### 其他選項
 

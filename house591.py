@@ -344,45 +344,85 @@ def prop_key(r):
     (同一間房換仲介刊登 houseid 就變了)。"""
     tail = r.get("地址") or r.get("社區") or str(r["houseid"])
     return "|".join([r.get("行政區", ""), r.get("類別", ""),
-                     str(r.get("坪數", "")), tail])
+                     str(r.get("坪數", "")), str(r.get("樓層", "")), tail])
 
 
 def diff_snapshot(rows):
-    """跟上次結果比對，標出新上架 / 降價 / 已下架。"""
+    """跟上次結果比對，標出新上架 / 降價 / 已下架。
+
+    591 每次回的分頁結果會些微跳動（同樣的條件，前後兩次抓到的集合會差幾筆），
+    所以不能「這次沒看到就算下架」——那樣每天都會冒出十幾筆假異動。
+    這裡改成記錄每筆物件連續幾次沒出現，連續 2 次才算真的下架。
+    """
     path = os.path.join(DATA_DIR, "snapshot.json")
-    prev = {}
+    store = {"run": 0, "items": {}}
     if os.path.exists(path):
         try:
-            prev = load_json(path)
+            raw = load_json(path)
+            if isinstance(raw, dict) and "items" in raw:
+                store = raw
+            elif isinstance(raw, dict):        # 舊版格式，轉一次
+                store = {"run": 1, "items": {k: dict(v, miss=0)
+                                             for k, v in raw.items()}}
         except Exception:
-            prev = {}
+            pass
 
-    now = {prop_key(r): {"price": r["總價(萬)"], "title": r["標題"],
-                         "station": r["捷運站"], "houseid": r["houseid"]}
-           for r in rows}
+    first_run = not store["items"]
+    run = store["run"] + 1
+    items = store["items"]
 
+    # 先把這次的結果整理成 指紋 -> 物件，並找出撞號的指紋。
+    # 撞號代表這個指紋分不出是哪一戶，拿去比價會產生假的降價，所以排除在異動判斷外。
+    current, ambiguous = {}, set()
+    for r in rows:
+        key = prop_key(r)
+        if key in current:
+            ambiguous.add(key)
+        current[key] = r
+
+    prev = items                       # 上次存下來的狀態，比對期間不動它
     new_ids, drops = [], []
-    for hid, cur in now.items():
-        old = prev.get(hid)
-        if old is None:
-            new_ids.append(hid)
-        elif old.get("price") and cur["price"] and cur["price"] < old["price"]:
-            drops.append((hid, old["price"], cur["price"]))
-    gone = [(hid, v) for hid, v in prev.items() if hid not in now]
+    updated = {}
+    for key, r in current.items():
+        cur = r["總價(萬)"]
+        old = prev.get(key)
+        if key not in ambiguous:
+            if old is None:
+                if not first_run:
+                    new_ids.append(key)
+            else:
+                op = to_num(old.get("price"))
+                if op is not None and cur is not None and cur < op:
+                    drops.append((key, op, cur))
+        updated[key] = {"price": cur, "title": r["標題"], "station": r["捷運站"],
+                        "houseid": r["houseid"], "miss": 0}
+    items = dict(prev, **updated)
+
+    # 這次沒出現的，累計未出現次數；連續 2 次才判定下架
+    seen = set(current)
+    gone = []
+    for key in list(items):
+        if key in seen:
+            continue
+        items[key]["miss"] = items[key].get("miss", 0) + 1
+        if items[key]["miss"] == 2:
+            gone.append((key, items[key]))
+        elif items[key]["miss"] > 3:
+            del items[key]                     # 早就沒了，不用再留
 
     by_key = {prop_key(r): r for r in rows}
     new_set = set(new_ids)
     for r in rows:
-        r["新上架"] = "是" if prev and prop_key(r) in new_set else ""
+        r["新上架"] = "是" if not first_run and prop_key(r) in new_set else ""
         r["對比上次"] = ""
     for key, old_p, new_p in drops:
         by_key[key]["對比上次"] = "降 %g 萬 (%g→%g)" % (old_p - new_p, old_p, new_p)
 
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(now, f, ensure_ascii=False)
+        json.dump({"run": run, "items": items}, f, ensure_ascii=False)
 
-    return {"first_run": not prev, "new": new_ids, "drops": drops, "gone": gone}
+    return {"first_run": first_run, "new": new_ids, "drops": drops, "gone": gone}
 
 
 # ---------------------------------------------------------------- 輸出
@@ -485,7 +525,8 @@ def write_html(rows, cfg, changes, stamp):
         if r.get("同物件筆數", 1) > 1:
             flags += '<span class="tag dup" title="%s">%d 家仲介</span>' % (
                 esc(r.get("其他仲介", "")), r["同物件筆數"])
-        parts.append("<tr>")
+        parts.append('<tr tabindex="0" role="link" data-url="%s" title="點一下在 591 開啟">'
+                     % esc(r["連結"]))
         for c in cols:
             v = r.get(c)
             v = "" if v is None else v
@@ -529,6 +570,8 @@ thead th{position:sticky;top:0;background:var(--card);font-weight:600;font-size:
 color:var(--mut);cursor:pointer;user-select:none}
 thead th:hover{color:var(--fg)}
 tbody tr:last-child td{border-bottom:0}
+tbody tr{cursor:pointer}
+tbody tr:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
 tbody tr:nth-child(even){background:var(--zebra)}
 tbody tr:hover{background:color-mix(in srgb,var(--acc) 9%,transparent)}
 .num{text-align:right;font-variant-numeric:tabular-nums}
@@ -561,6 +604,18 @@ HTML_TAIL = """<script>
      r.style.display=hit?'':'none'; if(hit)n++;
    });
    show(n);
+ });
+ /* 整列可點，不用滑到最右邊 */
+ function openRow(tr){ var u=tr&&tr.getAttribute('data-url'); if(u) window.open(u,'_blank','noopener'); }
+ tb.addEventListener('click',function(e){
+   if(e.target.closest('a')) return;
+   if(String(getSelection())) return;
+   openRow(e.target.closest('tr'));
+ });
+ tb.addEventListener('keydown',function(e){
+   if(e.key!=='Enter'&&e.key!==' ') return;
+   var tr=e.target.closest('tr'); if(!tr) return;
+   e.preventDefault(); openRow(tr);
  });
  var dir={};
  [].forEach.call(tbl.tHead.rows[0].cells,function(th,i){

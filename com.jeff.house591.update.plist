@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.jeff.house591.update</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/jeff/Documents/Github/house591/update.sh</string>
+  </array>
+
+  <!-- 每天 09:00。Mac 睡著錯過的話，醒來後 launchd 會補跑一次 -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>9</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/jeff/Documents/Github/house591/logs/update.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/jeff/Documents/Github/house591/logs/update.err.log</string>
+
+  <key>RunAtLoad</key><false/>
+</dict>
+</plist>

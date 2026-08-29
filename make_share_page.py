@@ -84,6 +84,8 @@ def build(rows, stations_ref, cfg):
             "ti": r.get("標題", ""),
             "url": r.get("連結", ""),
             "dup": int(r.get("同物件筆數") or 1),
+            "new": r.get("新上架", ""),
+            "chg": r.get("對比上次", ""),
         })
 
     # 各站統計
@@ -292,6 +294,8 @@ thead th[aria-sort="ascending"]::after{content:"↑"}
 tbody tr:last-child td{border-bottom:0}
 tbody tr:nth-child(even){background:var(--zebra)}
 tbody tr:hover{background:var(--accent-soft)}
+tbody tr{cursor:pointer}
+tbody tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 td.r{text-align:right}
 td.ti{white-space:normal;min-width:300px;max-width:440px;line-height:1.45}
 td.ti a{color:var(--ink);text-decoration:none;border-bottom:1px solid transparent}
@@ -302,6 +306,14 @@ td.ti a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   display:inline-block;font-size:11px;padding:1px 7px;border-radius:5px;
   border:1px solid var(--line);color:var(--mut);margin-left:6px;
 }
+.pill.new{color:#0f766e;border-color:currentColor}
+.pill.down{color:#b91c1c;border-color:currentColor}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]) .pill.new{color:#5eead4}
+  :root:not([data-theme="light"]) .pill.down{color:#fca5a5}
+}
+:root[data-theme="dark"] .pill.new{color:#5eead4}
+:root[data-theme="dark"] .pill.down{color:#fca5a5}
 .empty{padding:40px;text-align:center;color:var(--mut)}
 footer{margin-top:36px;font-size:12.5px;color:var(--mut);line-height:1.7}
 @media (max-width:820px){
@@ -316,7 +328,7 @@ footer{margin-top:36px;font-size:12.5px;color:var(--mut);line-height:1.7}
 <header>
   <p class="eyebrow">591 · 台北市</p>
   <h1>捷運沿線置產看板</h1>
-  <p class="lede">__CATS__ ｜ __COND__。點左側站名可只看該站，欄位標題可排序。</p>
+  <p class="lede">__CATS__ ｜ __COND__。點任一列可開啟該物件的 591 頁面；點左側站名可只看該站，欄位標題可排序。</p>
   <p class="meta">
     <span><b>__COUNT__</b> 間物件</span>
     <span><b>__STATIONS__</b> 個捷運站</span>
@@ -442,7 +454,8 @@ function draw() {
     return String(x).localeCompare(String(y), 'zh-Hant') * sgn;
   });
 
-  document.getElementById('tb').innerHTML = rows.map(i => `<tr>
+  document.getElementById('tb').innerHTML = rows.map(i => `<tr tabindex="0" role="link"
+    data-url="${esc(i.url)}" aria-label="在 591 開啟：${esc(i.ti)}" title="點一下在 591 開啟">
     <td><i class="sdot" style="background:${colorOf(i.s)}"></i>${esc(i.s)}</td>
     <td class="r num">${i.d == null ? '—' : i.d + ' m'}</td>
     <td>${esc(i.c)}</td><td>${esc(i.t) || '—'}</td>
@@ -450,6 +463,8 @@ function draw() {
     <td class="r num">${fmt(i.a)}</td><td>${esc(i.fl) || '—'}</td>
     <td>${esc(i.ag) || '—'}</td><td>${esc(i.dt)}</td><td>${esc(i.ad) || '—'}</td>
     <td class="ti"><a href="${esc(i.url)}" target="_blank" rel="noopener">${esc(i.ti)}</a>${
+      i.new ? '<span class="pill new">新上架</span>' : ''}${
+      i.chg ? `<span class="pill down">${esc(i.chg)}</span>` : ''}${
       i.dup > 1 ? `<span class="pill">${i.dup} 家</span>` : ''}</td>
   </tr>`).join('');
 
@@ -467,6 +482,28 @@ function draw() {
     : Math.round(hrs / 24) + ' 天前';
   el.textContent = '（' + label + '）';
   if (hrs > 48) el.className = 'stale';   // 超過兩天就標色提醒資料可能過時
+})();
+
+/* 整列可點：不用滑到最右邊才找得到連結。
+   用事件委派，因為列會隨篩選與排序重畫。 */
+(function rowLinks() {
+  const tb = document.getElementById('tb');
+  const open = tr => {
+    const u = tr && tr.dataset.url;
+    if (u) window.open(u, '_blank', 'noopener');
+  };
+  tb.addEventListener('click', e => {
+    if (e.target.closest('a')) return;                       // 標題本來就是連結，讓它自己處理
+    if (String(getSelection())) return;                      // 使用者在選字，不要跳走
+    open(e.target.closest('tr'));
+  });
+  tb.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const tr = e.target.closest('tr');
+    if (!tr) return;
+    e.preventDefault();
+    open(tr);
+  });
 })();
 
 drawBoard();
