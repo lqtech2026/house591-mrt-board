@@ -191,6 +191,13 @@ def crawl(cfg, station_ids, dry_run=False):
 
 # ---------------------------------------------------------------- 整理
 
+def is_basement(floor):
+    """樓層欄長得像 "B1/12F"、"1F/4F"、"整棟/2F"、"1F~2F/2F"。
+    斜線前面才是物件自己的樓層，以 B 開頭就是地下室。土地沒有樓層，回 False。"""
+    own = str(floor or "").split("/")[0].strip()
+    return own.upper().startswith("B")
+
+
 def clean_station(name, known):
     """591 回的是「古亭站」「台北車站」，統一成設定檔裡的寫法(別把台北車站砍成台北車)。"""
     if not name:
@@ -212,6 +219,7 @@ def normalise(raw, cfg):
     min_price = cfg.get("min_price_wan")
     max_price = cfg.get("max_price_wan")
     min_unit = cfg.get("min_unit_price_wan")
+    drop_b = cfg.get("exclude_basement", True)
 
     for h in raw.values():
         dist = to_num(h.get("distance"))
@@ -230,6 +238,9 @@ def normalise(raw, cfg):
         if min_price is not None and price < min_price:
             continue
         if max_price is not None and price > max_price:
+            continue
+
+        if drop_b and is_basement(h.get("floor")):
             continue
 
         unit = to_num(h.get("unitprice"))

@@ -31,6 +31,8 @@
   "max_area_ping": null,
   "max_distance_m": 1000,
   "_max_distance_m": "離捷運站的直線距離上限(公尺)。591 本身收到 2000m，設 null 就全收。",
+  "exclude_basement": true,
+  "_exclude_basement": "排除樓層以 B 開頭(B1、B2…)的物件。591 的「一樓店面」會混進 B1+1樓 的複合店面，這裡把它們濾掉。土地與透天(整棟/1F~2F)不受影響。",
   "merge_duplicates": true,
   "_merge_duplicates": "同一間房常被多家仲介同時刊登。true = 合併成一間(保留離站最近那筆，其餘列在「其他仲介」欄)，避免筆數與中位數失真。",
   "min_price_wan": null,
