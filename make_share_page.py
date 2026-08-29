@@ -48,6 +48,13 @@ def _load_prop_key():
 PROP_KEY = _load_prop_key()
 
 
+def _range_high(rng):
+    """開價區間 "6850~6880" -> 6880。代表價是最低開價，這裡取最高的那個。"""
+    if not rng or "~" not in rng:
+        return None
+    return num(rng.split("~")[-1])
+
+
 def short_key(row):
     """給「我的最愛」用的短代號。指紋不含刊登編號，所以同一間房換仲介刊登也還認得。"""
     return hashlib.sha1(PROP_KEY(row).encode("utf-8")).hexdigest()[:8]
@@ -104,9 +111,10 @@ def build(rows, stations_ref, cfg):
             "ti": r.get("標題", ""),
             "url": r.get("連結", ""),
             "dup": int(r.get("同物件筆數") or 1),
-            "rng": r.get("開價區間", ""),
+            "hi": _range_high(r.get("開價區間", "")),
             "new": r.get("新上架", ""),
             "chg": r.get("對比上次", ""),
+            "sv": 2 if r.get("新上架") else (1 if r.get("對比上次") else 0),
         })
 
     # 各站統計
@@ -325,6 +333,10 @@ thead th.favcol{cursor:default}
 .star[aria-pressed="true"]{color:#e0a12a}
 .star:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .pill.gone{color:var(--mut);border-style:dashed}
+td.stat{padding-left:6px;padding-right:6px}
+td.stat .pill{margin-left:0;margin-right:4px}
+td.stat:empty{padding:0}
+td.r .pill.rng{margin-left:6px;font-weight:400}
 .pill.rng{color:var(--accent);border-color:currentColor}
 .favbar{
   display:flex;gap:8px;align-items:center;max-width:1180px;margin:0 auto 10px;
@@ -370,7 +382,7 @@ footer{margin-top:36px;font-size:12.5px;color:var(--mut);line-height:1.7}
 <header>
   <p class="eyebrow">591 · 台北市</p>
   <h1>捷運沿線置產看板</h1>
-  <p class="lede">__CATS__ ｜ __COND__。點 ☆ 收進最愛；點任一列開啟該物件的 591 頁面；點左側站名可只看該站，欄位標題可排序。</p>
+  <p class="lede">__CATS__ ｜ __COND__。預設把新上架排在最前面。點 ☆ 收進最愛；點任一列開啟該物件的 591 頁面；點左側站名可只看該站，欄位標題可排序。</p>
   <p class="meta">
     <span><b>__COUNT__</b> 間物件</span>
     <span><b>__STATIONS__</b> 個捷運站</span>
@@ -398,6 +410,7 @@ footer{margin-top:36px;font-size:12.5px;color:var(--mut);line-height:1.7}
 <div class="tablebox"><table id="tbl">
   <thead><tr>
     <th class="favcol" title="我的最愛">★</th>
+    <th data-k="sv" title="點這裡可把新上架與降價排到最前面">狀態</th>
     <th data-k="s">捷運站</th><th data-k="d" class="r">距離</th>
     <th data-k="c">類別</th><th data-k="t">型態</th>
     <th data-k="p" class="r">總價</th><th data-k="u" class="r">單價</th>
@@ -507,7 +520,7 @@ function favRows() {
 }
 
 /* ---------- 篩選 ---------- */
-const state = {station: null, cat: null, q: '', sort: 'u', asc: true, favOnly: false};
+const state = {station: null, cat: null, q: '', sort: 'sv', asc: false, favOnly: false};
 
 document.getElementById('catchips').innerHTML =
   ['全部', ...DATA.cats].map((c, i) =>
@@ -548,17 +561,18 @@ function draw() {
       aria-pressed="${FAVS[i.k] ? 'true' : 'false'}"
       aria-label="${FAVS[i.k] ? '從最愛移除' : '加入最愛'}"
       title="${FAVS[i.k] ? '從最愛移除' : '加入最愛'}">${FAVS[i.k] ? '★' : '☆'}</button></td>
+    <td class="stat">${i.new ? '<span class="pill new">新上架</span>' : ''}${
+      i.chg ? `<span class="pill down">${esc(i.chg)}</span>` : ''}</td>
     <td><i class="sdot" style="background:${colorOf(i.s)}"></i>${esc(i.s)}</td>
     <td class="r num">${i.d == null ? '—' : i.d + ' m'}</td>
     <td>${esc(i.c)}</td><td>${esc(i.t) || '—'}</td>
-    <td class="r num">${fmt(i.p)}</td><td class="r num">${fmt(i.u)}</td>
+    <td class="r num">${fmt(i.p)}${
+      i.hi ? `<span class="pill rng" title="另有仲介開價較高，這是同一間房">最高 ${fmt(i.hi)}</span>` : ''}</td>
+    <td class="r num">${fmt(i.u)}</td>
     <td class="r num">${fmt(i.a)}</td><td>${esc(i.fl) || '—'}</td>
     <td>${esc(i.ag) || '—'}</td><td>${esc(i.dt)}</td><td>${esc(i.ad) || '—'}</td>
     <td class="ti"><a href="${esc(i.url)}" target="_blank" rel="noopener">${esc(i.ti)}</a>${
-      i.new ? '<span class="pill new">新上架</span>' : ''}${
-      i.chg ? `<span class="pill down">${esc(i.chg)}</span>` : ''}${
       i.dup > 1 ? `<span class="pill">${i.dup} 家</span>` : ''}${
-      i.rng ? `<span class="pill rng" title="各家仲介開價不同">開價 ${esc(i.rng)} 萬</span>` : ''}${
       i.gone ? '<span class="pill gone">已不在目前名單</span>' : ''}</td>
   </tr>`).join('');
 
@@ -649,7 +663,7 @@ document.getElementById('favclear').addEventListener('click', function () {
 })();
 
 drawBoard();
-document.querySelector('#tbl thead th[data-k="u"]').setAttribute('aria-sort', 'ascending');
+document.querySelector('#tbl thead th[data-k="sv"]').setAttribute('aria-sort', 'descending');
 draw();
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { drawBoard(); draw(); });
 </script>"""

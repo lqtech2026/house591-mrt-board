@@ -96,6 +96,12 @@ cd ~/Documents/Github/house591 && ./update.sh
 > `update.sh` 固定用 `/usr/bin/python3`。Homebrew 的 python3 帶 OpenSSL 3.x，
 > 會因為 591 憑證缺少 Subject Key Identifier 而連不上；系統 python3 的 LibreSSL 沒這問題。
 
+### 欄位順序
+
+「狀態」欄放在最前面（★ 的右邊），新上架與降價一眼就看得到，不必滑到最右邊。
+表格預設就是照狀態排序，新上架的排在最上面。
+同一間房有多家仲介開不同價時，代表價取**最低**的那個，總價旁邊會標「最高 X」。
+
 ### 我的最愛
 
 每一列最左邊有 ☆，點一下就收進最愛，「★ 只看最愛」可以只列出標記過的。

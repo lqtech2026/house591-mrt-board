@@ -349,6 +349,12 @@ def summarise(rows, key):
 
 # ---------------------------------------------------------------- 快照比對
 
+# 物件指紋的版本。改了 prop_key 的組成就把這個數字加一：
+# 舊快照的 key 會全部對不上，與其噴出一整批假的「新上架／已下架」，
+# 不如直接重建基準。
+KEY_VERSION = 2
+
+
 def prop_key(r):
     """物件指紋。刻意不含價格(價格是要拿來比的)，也不含 houseid
     (同一間房換仲介刊登 houseid 就變了)。"""
@@ -370,10 +376,10 @@ def diff_snapshot(rows):
         try:
             raw = load_json(path)
             if isinstance(raw, dict) and "items" in raw:
-                store = raw
-            elif isinstance(raw, dict):        # 舊版格式，轉一次
-                store = {"run": 1, "items": {k: dict(v, miss=0)
-                                             for k, v in raw.items()}}
+                if raw.get("key_version") == KEY_VERSION:
+                    store = raw
+                else:
+                    log("  指紋格式已更新，重建比對基準（這次不判定異動）")
         except Exception:
             pass
 
@@ -430,7 +436,8 @@ def diff_snapshot(rows):
 
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({"run": run, "items": items}, f, ensure_ascii=False)
+        json.dump({"run": run, "key_version": KEY_VERSION, "items": items},
+                  f, ensure_ascii=False)
 
     return {"first_run": first_run, "new": new_ids, "drops": drops, "gone": gone}
 
@@ -518,26 +525,34 @@ def write_html(rows, cfg, changes, stamp):
                  '<div class="toolbar"><input id="q" type="search" '
                  'placeholder="搜尋站名 / 地址 / 社區 / 標題…"><span id="cnt"></span></div>'
                  '<div class="scroll"><table id="rows"><thead><tr>')
-    cols = ["捷運站", "距離(m)", "類別", "型態", "總價(萬)", "單價(萬/坪)", "坪數",
+    cols = ["狀態", "捷運站", "距離(m)", "類別", "型態", "總價(萬)", "單價(萬/坪)", "坪數",
             "格局", "樓層", "屋齡", "行政區", "地址", "標題"]
     for i, c in enumerate(cols):
         parts.append('<th data-i="%d">%s</th>' % (i, esc(c)))
     parts.append("</tr></thead><tbody>")
 
     for r in rows:
-        flags = ""
+        # 新上架與降價是最該一眼看到的，放在最前面的「狀態」欄
+        status = ""
         if r.get("新上架"):
-            flags += '<span class="tag new">新</span>'
+            status += '<span class="tag new">新上架</span>'
         if r.get("對比上次"):
-            flags += '<span class="tag drop">%s</span>' % esc(r["對比上次"])
+            status += '<span class="tag drop">%s</span>' % esc(r["對比上次"])
         elif r.get("降價") == "是":
-            flags += '<span class="tag drop">降價</span>'
+            status += '<span class="tag drop">降價</span>'
+
+        flags = ""
         if r.get("同物件筆數", 1) > 1:
             flags += '<span class="tag dup" title="%s">%d 家仲介</span>' % (
                 esc(r.get("其他仲介", "")), r["同物件筆數"])
+        if r.get("開價區間"):
+            flags += '<span class="tag rng">開價 %s 萬</span>' % esc(r["開價區間"])
         parts.append('<tr tabindex="0" role="link" data-url="%s" title="點一下在 591 開啟">'
                      % esc(r["連結"]))
         for c in cols:
+            if c == "狀態":
+                parts.append('<td class="stat">%s</td>' % status)
+                continue
             v = r.get(c)
             v = "" if v is None else v
             if c == "標題":
@@ -594,6 +609,9 @@ font-size:11px;vertical-align:middle;white-space:nowrap}
 .tag.new{color:var(--new);border:1px solid currentColor}
 .tag.drop{color:var(--drop);border:1px solid currentColor}
 .tag.dup{color:var(--mut);border:1px solid var(--line)}
+.tag.rng{color:var(--acc);border:1px solid currentColor}
+td.stat{white-space:nowrap}
+td.stat .tag{margin-left:0;margin-right:4px}
 .stats td:first-child{font-weight:500}
 .toolbar{max-width:1180px;margin:0 auto 10px;display:flex;gap:12px;align-items:center}
 #q{flex:1;max-width:360px;padding:7px 11px;border:1px solid var(--line);border-radius:8px;
