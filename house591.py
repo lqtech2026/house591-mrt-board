@@ -508,8 +508,8 @@ def write_html(rows, cfg, changes, stamp):
 HTML_HEAD = """<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{TITLE}}</title><style>
-:root{--bg:#fbfaf9;--fg:#1c1b1a;--mut:#6b6866;--line:#e4e0dc;--card:#fff;--acc:#b45309;--new:#0f766e;--drop:#b91c1c}
-@media(prefers-color-scheme:dark){:root{--bg:#191817;--fg:#eeecea;--mut:#a3a09d;--line:#333130;--card:#232120;--acc:#f0a355;--new:#5eead4;--drop:#fca5a5}}
+:root{--bg:#fbfaf9;--fg:#1c1b1a;--mut:#6b6866;--line:#e4e0dc;--card:#fff;--zebra:#f5f3f1;--acc:#b45309;--new:#0f766e;--drop:#b91c1c}
+@media(prefers-color-scheme:dark){:root{--bg:#191817;--fg:#eeecea;--mut:#a3a09d;--line:#333130;--card:#232120;--zebra:#2a2827;--acc:#f0a355;--new:#5eead4;--drop:#fca5a5}}
 *{box-sizing:border-box}
 body{margin:0;padding:24px 20px 64px;background:var(--bg);color:var(--fg);
 font:15px/1.55 -apple-system,"PingFang TC","Noto Sans TC",Helvetica,sans-serif}
@@ -529,7 +529,8 @@ thead th{position:sticky;top:0;background:var(--card);font-weight:600;font-size:
 color:var(--mut);cursor:pointer;user-select:none}
 thead th:hover{color:var(--fg)}
 tbody tr:last-child td{border-bottom:0}
-tbody tr:hover{background:color-mix(in srgb,var(--acc) 7%,transparent)}
+tbody tr:nth-child(even){background:var(--zebra)}
+tbody tr:hover{background:color-mix(in srgb,var(--acc) 9%,transparent)}
 .num{text-align:right;font-variant-numeric:tabular-nums}
 .rng{color:var(--mut)}
 .ttl{white-space:normal;min-width:280px;max-width:460px}

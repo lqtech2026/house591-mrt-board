@@ -84,6 +84,17 @@ push 完網站會自動重新發布。
 
 - **直接傳檔案**：`out/index.html` 是自包的單一檔案，用 LINE / Email 傳過去，
   對方瀏覽器開就能看，連網路都不用。缺點是每次更新要重傳。
+- **AWS S3**：`awscli` 已裝好。設定憑證後跑 `./deploy_s3.sh` 就會自動建 bucket、
+  開靜態網站代管、上傳 `docs/`：
+
+  ```bash
+  aws configure          # 填 IAM 的 Access Key ID / Secret（在 AWS Console → IAM 建立）
+  ./deploy_s3.sh
+  ```
+
+  網址會是 `http://house591-mrt-board.s3-website-ap-northeast-1.amazonaws.com`。
+  **S3 網站端點只有 HTTP 沒有 HTTPS**，要 HTTPS 得再掛 CloudFront。單純要分享一頁靜態網站的話，
+  GitHub Pages 比較省事而且免費附 HTTPS。
 - **Vercel**：這台電腦沒裝 Node，要先 `brew install node`，再
   `npx vercel deploy out --prod`（第一次會要你登入 Vercel）。`out/vercel.json` 已備好。
 
