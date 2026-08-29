@@ -271,6 +271,7 @@ def normalise(raw, cfg):
             "刊登": h.get("refreshtime") or "",
             "聯絡人": h.get("nick_name") or h.get("linkman") or "",
             "同物件筆數": 1,
+            "開價區間": "",
             "其他仲介": "",
             "其他連結": "",
             "houseid": h["houseid"],
@@ -282,19 +283,28 @@ def normalise(raw, cfg):
 
 
 def merge_duplicates(rows):
-    """同一間房常被好幾家仲介同時刊登。用 行政區+類別+坪數+總價 當指紋合併，
-    保留離站最近的那筆當代表，其餘記在「其他仲介」欄，避免筆數與中位數被灌水。"""
+    """同一間房常被好幾家仲介同時刊登，而且各家開價可能不一樣。
+
+    用 prop_key（區＋類別＋坪數＋樓層＋地址，不含價格）當指紋合併，
+    保留開價最低的那筆當代表；各家開價不同時記在「開價區間」，那是議價的資訊。
+    合併鍵不含價格才抓得到「同一間、兩家開不同價」的情形。
+    """
     groups = {}
     for r in rows:
-        key = (r["行政區"], r["類別"], r["坪數"], r["總價(萬)"])
-        groups.setdefault(key, []).append(r)
+        groups.setdefault(prop_key(r), []).append(r)
 
     merged = []
     for items in groups.values():
-        items.sort(key=lambda x: (x["距離(m)"] if x["距離(m)"] is not None else 9999,
-                                  x["houseid"]))
+        items.sort(key=lambda x: (
+            x["總價(萬)"] if x["總價(萬)"] is not None else float("inf"),
+            x["距離(m)"] if x["距離(m)"] is not None else 9999,
+            x["houseid"]))
         rep = dict(items[0])
         rep["同物件筆數"] = len(items)
+
+        prices = sorted({i["總價(萬)"] for i in items if i["總價(萬)"] is not None})
+        rep["開價區間"] = "%g~%g" % (prices[0], prices[-1]) if len(prices) > 1 else ""
+
         if len(items) > 1:
             others = [i["聯絡人"] for i in items[1:] if i["聯絡人"]]
             rep["其他仲介"] = "、".join(dict.fromkeys(others))
@@ -430,7 +440,7 @@ def diff_snapshot(rows):
 CSV_FIELDS = ["類別", "型態", "捷運站", "距離(m)", "總價(萬)", "單價(萬/坪)", "坪數",
               "主建物坪", "格局", "樓層", "屋齡", "行政區", "地址", "社區",
               "含車位", "降價", "新上架", "對比上次", "刊登", "聯絡人",
-              "同物件筆數", "其他仲介", "標題", "houseid", "連結", "其他連結"]
+              "同物件筆數", "開價區間", "其他仲介", "標題", "houseid", "連結", "其他連結"]
 
 
 def write_csv(rows, stamp):

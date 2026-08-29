@@ -10,6 +10,8 @@
 
 import csv
 import glob
+import hashlib
+import importlib.util
 import json
 import os
 import sys
@@ -32,6 +34,23 @@ LINE_COLORS = {
 }
 
 NUM_COLS = {"距離(m)", "總價(萬)", "單價(萬/坪)", "坪數", "同物件筆數"}
+
+
+def _load_prop_key():
+    """直接沿用 house591.py 的物件指紋，避免兩邊各寫一份而走鐘。"""
+    spec = importlib.util.spec_from_file_location(
+        "_h", os.path.join(BASE_DIR, "house591.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.prop_key
+
+
+PROP_KEY = _load_prop_key()
+
+
+def short_key(row):
+    """給「我的最愛」用的短代號。指紋不含刊登編號，所以同一間房換仲介刊登也還認得。"""
+    return hashlib.sha1(PROP_KEY(row).encode("utf-8")).hexdigest()[:8]
 
 
 def num(v):
@@ -69,6 +88,7 @@ def build(rows, stations_ref, cfg):
     for r in rows:
         st = r.get("捷運站", "")
         items.append({
+            "k": short_key(r),
             "s": st,
             "d": r.get("距離(m)"),
             "c": r.get("類別", ""),
@@ -84,6 +104,7 @@ def build(rows, stations_ref, cfg):
             "ti": r.get("標題", ""),
             "url": r.get("連結", ""),
             "dup": int(r.get("同物件筆數") or 1),
+            "rng": r.get("開價區間", ""),
             "new": r.get("新上架", ""),
             "chg": r.get("對比上次", ""),
         })
@@ -294,6 +315,27 @@ thead th[aria-sort="ascending"]::after{content:"↑"}
 tbody tr:last-child td{border-bottom:0}
 tbody tr:nth-child(even){background:var(--zebra)}
 tbody tr:hover{background:var(--accent-soft)}
+th.favcol,td.favcol{width:34px;padding-left:12px;padding-right:0;text-align:center}
+thead th.favcol{cursor:default}
+.star{
+  font:inherit;font-size:15px;line-height:1;padding:2px 4px;border:0;border-radius:5px;
+  background:none;color:var(--line);cursor:pointer;transition:color .12s,transform .08s;
+}
+.star:hover{color:var(--mut);transform:scale(1.15)}
+.star[aria-pressed="true"]{color:#e0a12a}
+.star:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.pill.gone{color:var(--mut);border-style:dashed}
+.pill.rng{color:var(--accent);border-color:currentColor}
+.favbar{
+  display:flex;gap:8px;align-items:center;max-width:1180px;margin:0 auto 10px;
+  font-size:13px;color:var(--mut);
+}
+.linkbtn{
+  font:inherit;font-size:13px;padding:4px 10px;border-radius:7px;
+  border:1px solid var(--line);background:var(--surface);color:var(--ink-2);cursor:pointer;
+}
+.linkbtn:hover{border-color:var(--accent);color:var(--ink)}
+.linkbtn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 tbody tr{cursor:pointer}
 tbody tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 td.r{text-align:right}
@@ -328,7 +370,7 @@ footer{margin-top:36px;font-size:12.5px;color:var(--mut);line-height:1.7}
 <header>
   <p class="eyebrow">591 · 台北市</p>
   <h1>捷運沿線置產看板</h1>
-  <p class="lede">__CATS__ ｜ __COND__。點任一列可開啟該物件的 591 頁面；點左側站名可只看該站，欄位標題可排序。</p>
+  <p class="lede">__CATS__ ｜ __COND__。點 ☆ 收進最愛；點任一列開啟該物件的 591 頁面；點左側站名可只看該站，欄位標題可排序。</p>
   <p class="meta">
     <span><b>__COUNT__</b> 間物件</span>
     <span><b>__STATIONS__</b> 個捷運站</span>
@@ -344,11 +386,18 @@ footer{margin-top:36px;font-size:12.5px;color:var(--mut);line-height:1.7}
 <h2>物件明細</h2>
 <div class="tools">
   <div class="chips" id="catchips"></div>
+  <button class="chip" id="favchip" aria-pressed="false">★ 只看最愛</button>
   <input type="search" id="q" placeholder="搜尋站名、地址、標題…" aria-label="搜尋">
   <span class="shown" id="shown"></span>
 </div>
+<div class="favbar" id="favbar" hidden>
+  <span id="favmsg"></span>
+  <button class="linkbtn" id="favshare">複製最愛的連結</button>
+  <button class="linkbtn" id="favclear">清空最愛</button>
+</div>
 <div class="tablebox"><table id="tbl">
   <thead><tr>
+    <th class="favcol" title="我的最愛">★</th>
     <th data-k="s">捷運站</th><th data-k="d" class="r">距離</th>
     <th data-k="c">類別</th><th data-k="t">型態</th>
     <th data-k="p" class="r">總價</th><th data-k="u" class="r">單價</th>
@@ -418,8 +467,47 @@ function drawBoard() {
   }));
 }
 
+/* ---------- 我的最愛 ----------
+   存在瀏覽器的 localStorage，只屬於這台裝置這個瀏覽器。
+   key 用的是物件指紋，不是刊登編號，所以同一間房換仲介重新刊登也還認得。
+   連同當下的資料一起存，之後物件從名單消失時仍找得回來。 */
+const FAV_STORE = 'house591.favs';
+let FAVS = {};
+try { FAVS = JSON.parse(localStorage.getItem(FAV_STORE) || '{}') || {}; } catch (e) { FAVS = {}; }
+const saveFavs = () => { try { localStorage.setItem(FAV_STORE, JSON.stringify(FAVS)); } catch (e) {} };
+const byKey = Object.fromEntries(DATA.items.map(i => [i.k, i]));
+
+// 網址帶 ?fav=xxx.yyy 就併進來，這樣最愛可以用連結分享／換裝置
+try {
+  const inc = new URLSearchParams(location.search).get('fav');
+  if (inc) {
+    inc.split('.').filter(Boolean).forEach(k => {
+      if (!FAVS[k]) FAVS[k] = {t: Date.now(), snap: byKey[k] || null};
+    });
+    saveFavs();
+    history.replaceState(null, '', location.pathname);   // 收掉網址上的參數
+  }
+} catch (e) {}
+
+function toggleFav(k) {
+  if (FAVS[k]) delete FAVS[k];
+  else FAVS[k] = {t: Date.now(), snap: byKey[k] || null};
+  saveFavs();
+  draw();
+}
+
+/* 最愛清單 = 目前名單裡被標記的 + 已經不在名單、但當初有存下來的 */
+function favRows() {
+  const here = DATA.items.filter(i => FAVS[i.k]);
+  const have = new Set(here.map(i => i.k));
+  const gone = Object.keys(FAVS)
+    .filter(k => !have.has(k) && FAVS[k] && FAVS[k].snap)
+    .map(k => Object.assign({}, FAVS[k].snap, {gone: true}));
+  return here.concat(gone);
+}
+
 /* ---------- 篩選 ---------- */
-const state = {station: null, cat: null, q: '', sort: 'u', asc: true};
+const state = {station: null, cat: null, q: '', sort: 'u', asc: true, favOnly: false};
 
 document.getElementById('catchips').innerHTML =
   ['全部', ...DATA.cats].map((c, i) =>
@@ -442,7 +530,7 @@ document.querySelectorAll('#tbl thead th').forEach(th => th.addEventListener('cl
 
 /* ---------- 明細 ---------- */
 function draw() {
-  let rows = DATA.items.filter(i =>
+  let rows = (state.favOnly ? favRows() : DATA.items).filter(i =>
     (!state.station || i.s === state.station) &&
     (!state.cat || i.c === state.cat) &&
     (!state.q || (i.s + i.ad + i.ti + i.dt + i.t).toLowerCase().includes(state.q)));
@@ -456,6 +544,10 @@ function draw() {
 
   document.getElementById('tb').innerHTML = rows.map(i => `<tr tabindex="0" role="link"
     data-url="${esc(i.url)}" aria-label="在 591 開啟：${esc(i.ti)}" title="點一下在 591 開啟">
+    <td class="favcol"><button class="star" data-fav="${esc(i.k)}"
+      aria-pressed="${FAVS[i.k] ? 'true' : 'false'}"
+      aria-label="${FAVS[i.k] ? '從最愛移除' : '加入最愛'}"
+      title="${FAVS[i.k] ? '從最愛移除' : '加入最愛'}">${FAVS[i.k] ? '★' : '☆'}</button></td>
     <td><i class="sdot" style="background:${colorOf(i.s)}"></i>${esc(i.s)}</td>
     <td class="r num">${i.d == null ? '—' : i.d + ' m'}</td>
     <td>${esc(i.c)}</td><td>${esc(i.t) || '—'}</td>
@@ -465,11 +557,26 @@ function draw() {
     <td class="ti"><a href="${esc(i.url)}" target="_blank" rel="noopener">${esc(i.ti)}</a>${
       i.new ? '<span class="pill new">新上架</span>' : ''}${
       i.chg ? `<span class="pill down">${esc(i.chg)}</span>` : ''}${
-      i.dup > 1 ? `<span class="pill">${i.dup} 家</span>` : ''}</td>
+      i.dup > 1 ? `<span class="pill">${i.dup} 家</span>` : ''}${
+      i.rng ? `<span class="pill rng" title="各家仲介開價不同">開價 ${esc(i.rng)} 萬</span>` : ''}${
+      i.gone ? '<span class="pill gone">已不在目前名單</span>' : ''}</td>
   </tr>`).join('');
 
+  const nFav = Object.keys(FAVS).length;
+  document.getElementById('favchip').textContent = nFav ? `★ 只看最愛 (${nFav})` : '★ 只看最愛';
+  const bar = document.getElementById('favbar');
+  bar.hidden = !state.favOnly;
+  if (state.favOnly) {
+    const gone = rows.filter(r => r.gone).length;
+    document.getElementById('favmsg').textContent =
+      nFav === 0 ? '還沒有標記任何物件。點每一列最左邊的 ☆ 就會加進來。'
+      : gone ? `${nFav} 間，其中 ${gone} 間已經不在目前名單`
+      : `${nFav} 間`;
+  }
+
   document.getElementById('empty').hidden = rows.length > 0;
-  document.getElementById('shown').textContent = '顯示 ' + rows.length + ' / ' + DATA.items.length + ' 間';
+  document.getElementById('shown').textContent =
+    '顯示 ' + rows.length + ' / ' + (state.favOnly ? nFav : DATA.items.length) + ' 間';
 }
 
 (function showAge() {
@@ -484,6 +591,37 @@ function draw() {
   if (hrs > 48) el.className = 'stale';   // 超過兩天就標色提醒資料可能過時
 })();
 
+/* 最愛的按鈕與工具列 */
+document.getElementById('favchip').addEventListener('click', function () {
+  state.favOnly = !state.favOnly;
+  this.setAttribute('aria-pressed', state.favOnly);
+  draw();
+});
+
+document.getElementById('favshare').addEventListener('click', async function () {
+  const keys = Object.keys(FAVS);
+  if (!keys.length) return;
+  const url = location.origin + location.pathname + '?fav=' + keys.join('.');
+  try {
+    await navigator.clipboard.writeText(url);
+    this.textContent = '已複製';
+  } catch (e) {
+    // 剪貼簿被擋時退回手動複製
+    const ta = document.createElement('textarea');
+    ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    this.textContent = document.execCommand('copy') ? '已複製' : '複製失敗，請手動複製網址';
+    document.body.removeChild(ta);
+  }
+  setTimeout(() => { this.textContent = '複製最愛的連結'; }, 2200);
+});
+
+document.getElementById('favclear').addEventListener('click', function () {
+  if (!Object.keys(FAVS).length) return;
+  if (!confirm('確定要清空所有最愛嗎？')) return;
+  FAVS = {}; saveFavs(); draw();
+});
+
 /* 整列可點：不用滑到最右邊才找得到連結。
    用事件委派，因為列會隨篩選與排序重畫。 */
 (function rowLinks() {
@@ -493,12 +631,16 @@ function draw() {
     if (u) window.open(u, '_blank', 'noopener');
   };
   tb.addEventListener('click', e => {
-    if (e.target.closest('a')) return;                       // 標題本來就是連結，讓它自己處理
-    if (String(getSelection())) return;                      // 使用者在選字，不要跳走
+    const star = e.target.closest('.star');
+    if (star) { toggleFav(star.dataset.fav); return; }        // 星星自己處理，不要開 591
+    if (e.target.closest('a')) return;                        // 標題本來就是連結
+    if (String(getSelection())) return;                       // 使用者在選字，不要跳走
     open(e.target.closest('tr'));
   });
   tb.addEventListener('keydown', e => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
+    const star = e.target.closest('.star');
+    if (star) { e.preventDefault(); toggleFav(star.dataset.fav); return; }
     const tr = e.target.closest('tr');
     if (!tr) return;
     e.preventDefault();
