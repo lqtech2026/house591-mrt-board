@@ -134,8 +134,12 @@ def real_listings(payload):
 # ---------------------------------------------------------------- 抓取
 
 def build_params(cfg, station_ids, category):
-    p = {"regionid": cfg["region_id"], "type": 2,
-         "station": ",".join(str(i) for i in station_ids)}
+    # 有指定捷運站就不送 regionid。站點 ID 本身已經框住地理範圍，
+    # 而且 591 不吃 regionid=1,3 這種多縣市寫法；送了反而會把跨縣市邊界的
+    # 物件砍掉（例如萬隆站走路可到的新北物件）。沒指定站點時才用 region_id 查整個縣市。
+    p = {"type": 2, "station": ",".join(str(i) for i in station_ids)}
+    if not station_ids:
+        p["regionid"] = cfg["region_id"]
     p.update(CATEGORIES[category])
 
     lo, hi = cfg.get("min_area_ping"), cfg.get("max_area_ping")
@@ -228,6 +232,8 @@ def normalise(raw, cfg):
     max_price = cfg.get("max_price_wan")
     min_unit = cfg.get("min_unit_price_wan")
     drop_b = cfg.get("exclude_basement", True)
+    districts = cfg.get("allowed_districts")
+    districts = set(districts) if districts else None
 
     for h in raw.values():
         dist = to_num(h.get("distance"))
@@ -249,6 +255,10 @@ def normalise(raw, cfg):
             continue
 
         if drop_b and is_basement(h.get("floor")):
+            continue
+
+        # 591 偶爾把無關的物件配到錯誤的捷運站，用行政區白名單擋掉
+        if districts and h.get("section_name") not in districts:
             continue
 
         unit = to_num(h.get("unitprice"))
@@ -283,6 +293,7 @@ def normalise(raw, cfg):
             "精選": "",
             "精選理由": "",
             "開價區間": "",
+            "坪數爭議": "",
             "其他仲介": "",
             "其他連結": "",
             "houseid": h["houseid"],
@@ -315,6 +326,7 @@ def merge_duplicates(rows):
 
         prices = sorted({i["總價(萬)"] for i in items if i["總價(萬)"] is not None})
         rep["開價區間"] = "%g~%g" % (prices[0], prices[-1]) if len(prices) > 1 else ""
+        rep["坪數爭議"] = ""
 
         if len(items) > 1:
             others = [i["聯絡人"] for i in items[1:] if i["聯絡人"]]
@@ -325,8 +337,36 @@ def merge_duplicates(rows):
             rep["其他連結"] = ""
         merged.append(rep)
 
-    merged.sort(key=lambda r: (r["捷運站"], r["距離(m)"] if r["距離(m)"] is not None else 9999))
-    return merged
+    # 第二輪：同地址＋同總價，但坪數不一樣。
+    # 這是同一間房被不同仲介用不同口徑登錄（一家寫含增建的 84 坪、
+    # 一家寫登記的 35.72 坪），第一輪因為指紋含坪數而漏掉。
+    # 代表取**坪數較小**那筆：登記坪數才是站得住腳的數字，
+    # 用灌水的坪數會同時高估面積與低估單價。
+    second = {}
+    for r in merged:
+        addr = (r.get("地址") or "").strip()
+        key = (r["行政區"], r["類別"], addr, r["總價(萬)"]) if addr else ("", id(r))
+        second.setdefault(key, []).append(r)
+
+    out = []
+    for group in second.values():
+        if len(group) == 1:
+            out.append(group[0])
+            continue
+        group.sort(key=lambda x: (x["坪數"] if x["坪數"] is not None else float("inf")))
+        rep = group[0]
+        areas = sorted({x["坪數"] for x in group if x["坪數"] is not None})
+        if len(areas) > 1:
+            rep["坪數爭議"] = "另有仲介登 %s 坪" % "、".join("%g" % a for a in areas[1:])
+        rep["同物件筆數"] = sum(x["同物件筆數"] for x in group)
+        others = [x["聯絡人"] for x in group[1:] if x["聯絡人"]]
+        if others:
+            rep["其他仲介"] = "、".join(dict.fromkeys(
+                ([rep["其他仲介"]] if rep["其他仲介"] else []) + others))
+        out.append(rep)
+
+    out.sort(key=lambda r: (r["捷運站"], r["距離(m)"] if r["距離(m)"] is not None else 9999))
+    return out
 
 
 def _percentile(values, v):
@@ -457,10 +497,13 @@ def scope_fingerprint(cfg):
     """查詢範圍的指紋。改了類別、站點、坪數、距離或價格上下限，
     舊快照裡那些不再屬於範圍的物件會整批「消失」，若照常比對就會報出
     幾百筆假的已下架。範圍一變就重建基準。"""
-    scope = [cfg.get(k) for k in
-             ("categories", "stations", "region_id", "min_area_ping", "max_area_ping",
-              "max_distance_m", "min_price_wan", "max_price_wan",
-              "min_unit_price_wan", "exclude_basement")]
+    # 用反向列舉：扣掉純操作性與純顯示用的設定，其餘一律納入指紋。
+    # 正向維護一份「會影響範圍的鍵」清單，每次新增過濾條件都得記得補，
+    # 漏掉就會靜默失效（allowed_districts 就這樣漏過一次）。
+    IGNORE = {"org", "top_picks", "pick_weights",
+              "request_delay_sec", "max_pages_per_query", "timeout_sec", "retries"}
+    scope = {k: v for k, v in cfg.items()
+             if not k.startswith("_") and k not in IGNORE}
     return hashlib.sha1(
         json.dumps(scope, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
     ).hexdigest()[:12]
@@ -574,7 +617,7 @@ CSV_FIELDS = ["類別", "型態", "捷運站", "距離(m)", "總價(萬)", "單�
               "主建物坪", "格局", "樓層", "屋齡", "行政區", "地址", "社區",
               "含車位", "降價", "新上架", "對比上次", "刊登", "聯絡人",
               "評分", "精選", "精選理由",
-              "同物件筆數", "開價區間", "其他仲介", "標題", "houseid", "連結", "其他連結"]
+              "同物件筆數", "開價區間", "坪數爭議", "其他仲介", "標題", "houseid", "連結", "其他連結"]
 
 
 def write_csv(rows, stamp):

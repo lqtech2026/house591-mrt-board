@@ -26,7 +26,8 @@ python3 house591.py --stations   # 列出全台可用的捷運站名
 | `org` | 顯示在頁面抬頭的單位名稱（目前是「和聖壇」）。留空就不顯示 |
 | `top_picks` | 每次挑幾間精選，目前 3。設 0 就不挑 |
 | `pick_weights` | 精選排序的權重，見下方「今日精選」 |
-| `stations` | 要查的捷運站，站名照 `--stations` 列出來的寫 |
+| `stations` | 要查的捷運站，站名照 `--stations` 列出來的寫。目前 22 站＝台北市中心 17 站＋新店區 5 站（大坪林、七張、小碧潭、新店區公所、新店） |
+| `allowed_districts` | 行政區白名單，擋掉 591 配錯捷運站的物件 |
 | `categories` | 一樓店面 / 店面 / 土地 / 透天 / 別墅 / 住宅 / 公寓 / 電梯大樓 / 華廈 / 住辦 / 辦公 / 套房 / 廠房 / 車位 / 法拍屋 / 其他 |
 | `min_area_ping` / `max_area_ping` | 坪數範圍 |
 | `max_distance_m` | 離站距離上限。591 本身收到 2000 公尺，預設收緊到 1000 |
@@ -98,6 +99,16 @@ cd ~/Documents/Github/house591 && ./update.sh
 
 > `update.sh` 固定用 `/usr/bin/python3`。Homebrew 的 python3 帶 OpenSSL 3.x，
 > 會因為 591 憑證缺少 Subject Key Identifier 而連不上；系統 python3 的 LibreSSL 沒這問題。
+
+### 跨縣市
+
+有指定 `stations` 時**不會送 regionid**。站點 ID 已經框住地理範圍，而且 591 不吃
+`regionid=1,3` 這種多縣市寫法；送了反而會砍掉跨縣市邊界的物件（萬隆站走得到的
+新北物件就會不見）。`region_id` 只在沒指定站點、要查整個縣市時才用到。
+
+代價是 591 偶爾會把完全無關的物件配到錯誤的站（實際遇過桃園市八德區的透天被標成
+離大安森林公園站 408 公尺），所以用 `allowed_districts` 白名單擋掉。
+**改了 `stations` 記得一併檢查這份白名單。**
 
 ### 今日精選
 
