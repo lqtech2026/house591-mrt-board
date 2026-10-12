@@ -112,6 +112,8 @@ def build(rows, stations_ref, cfg):
             "url": r.get("連結", ""),
             "dup": int(r.get("同物件筆數") or 1),
             "hi": _range_high(r.get("開價區間", "")),
+            "sc": num(r.get("評分")),
+            "why": r.get("精選理由", ""),
             "new": r.get("新上架", ""),
             "chg": r.get("對比上次", ""),
             "sv": 2 if r.get("新上架") else (1 if r.get("對比上次") else 0),
@@ -375,6 +377,43 @@ td.ti a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 :root[data-theme="dark"] .pill.down{color:#fca5a5}
 .empty{padding:40px;text-align:center;color:var(--mut)}
 
+/* ---- 今日精選 ---- */
+#picks{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;max-width:1180px;margin:0 auto}
+.pick{
+  position:relative;background:var(--surface);border:1px solid var(--line);
+  border-radius:14px;padding:18px 18px 16px;display:grid;gap:9px;align-content:start;
+  cursor:pointer;box-shadow:var(--shadow);
+}
+.pick:hover{border-color:var(--accent)}
+.pick:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pick-rank{
+  position:absolute;top:-10px;left:16px;width:24px;height:24px;border-radius:50%;
+  background:var(--accent);color:#fff;font-size:13px;font-weight:600;
+  display:grid;place-items:center;
+}
+.pick-stn{display:flex;align-items:center;gap:6px;font-size:13.5px;color:var(--ink-2);margin-top:2px}
+.pick-ti{font-size:15px;line-height:1.45;font-weight:500;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.pick-p{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.pick-p b{font-size:26px;font-weight:600;font-family:"IBM Plex Mono",monospace;
+  font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.pick-p span{color:var(--ink-2);font-size:13px;font-variant-numeric:tabular-nums}
+.pick-why{
+  font-size:13px;line-height:1.6;color:var(--ink-2);
+  border-top:1px solid var(--line);padding-top:9px;margin-top:2px;
+}
+.pick-act{display:flex;gap:8px;align-items:center;margin-top:2px}
+.pick-act .star{font-size:17px;padding:2px 2px}
+.skipbtn{
+  font:inherit;font-size:12.5px;padding:3px 10px;border-radius:6px;margin-left:auto;
+  border:1px solid var(--line);background:none;color:var(--mut);cursor:pointer;
+}
+.skipbtn:hover{border-color:var(--ink-2);color:var(--ink-2)}
+.skipnote{font-size:13px;color:var(--mut);max-width:1180px;margin:10px auto 0}
+.skipnote button{font:inherit;font-size:13px;background:none;border:0;padding:0;
+  color:var(--accent);text-decoration:underline;cursor:pointer}
+@media (max-width:820px){#picks{grid-template-columns:1fr;gap:12px}}
+
 /* ---- 手機：表格換成卡片 ---- */
 #cards{display:none;max-width:1180px;margin:0 auto;gap:10px}
 #more{display:none;margin:14px auto 0;padding:9px 22px;font-size:14px}
@@ -447,6 +486,11 @@ footer{margin-top:36px;font-size:12.5px;color:var(--mut);line-height:1.7}
     <span>資料擷取 <b>__STAMP__</b><span id="age"></span></span>
   </p>
 </header>
+
+<h2 id="pickhead">今日精選</h2>
+<p class="hint" id="pickhint"></p>
+<div id="picks"></div>
+<p class="skipnote" id="skipnote" hidden></p>
 
 <h2>各站價格帶</h2>
 <p class="hint">總價單位萬元、單價單位萬元/坪。顏色是捷運路線色，
@@ -579,6 +623,7 @@ function toggleFav(k) {
   else FAVS[k] = {t: Date.now(), snap: byKey[k] || null};
   saveFavs();
   draw();
+  drawPicks();
 }
 
 /* 最愛清單 = 目前名單裡被標記的 + 已經不在名單、但當初有存下來的 */
@@ -612,6 +657,60 @@ document.querySelectorAll('#tbl thead th').forEach(th => th.addEventListener('cl
   th.setAttribute('aria-sort', state.asc ? 'ascending' : 'descending');
   draw();
 }));
+
+/* ---------- 今日精選 ----------
+   評分在 Python 端算好（坪數大／單價相對同類別便宜／離站近，加權平均），
+   這裡只負責排序與遞補。標成「不考慮」的存在瀏覽器，下一名就會自動補上來。 */
+const SKIP_STORE = 'house591.skips';
+let SKIPS = {};
+try { SKIPS = JSON.parse(localStorage.getItem(SKIP_STORE) || '{}') || {}; } catch (e) { SKIPS = {}; }
+const saveSkips = () => { try { localStorage.setItem(SKIP_STORE, JSON.stringify(SKIPS)); } catch (e) {} };
+const TOP_N = 3;
+
+function drawPicks() {
+  const pool = DATA.items
+    .filter(i => i.sc != null && !SKIPS[i.k])
+    .sort((a, b) => b.sc - a.sc || (a.d ?? 9999) - (b.d ?? 9999));
+  const top = pool.slice(0, TOP_N);
+
+  document.getElementById('pickhint').textContent = top.length
+    ? `從 ${DATA.items.length} 間裡挑出最合適的 ${top.length} 間：綜合坪數、單價是否相對便宜、離捷運站遠近。點卡片看 591 原始刊登。`
+    : '目前沒有可推薦的物件。';
+
+  document.getElementById('picks').innerHTML = top.map((i, n) => `
+    <div class="pick" tabindex="0" role="link" data-url="${esc(i.url)}"
+         aria-label="在 591 開啟：${esc(i.ti)}">
+      <span class="pick-rank">${n + 1}</span>
+      <div class="pick-stn"><i class="sdot" style="background:${colorOf(i.s)}"></i>${esc(i.s)}
+        ${i.d == null ? '' : i.d + ' m'} · ${esc(i.c)} · ${esc(i.dt)}</div>
+      <div class="pick-ti">${esc(i.ti)}</div>
+      <div class="pick-p"><b>${fmt(i.p)}</b><span>萬</span>
+        <span>${fmt(i.u)} 萬/坪 · ${fmt(i.a)} 坪</span></div>
+      ${i.why ? `<div class="pick-why">${esc(i.why)}</div>` : ''}
+      <div class="pick-act">${starHTML(i)}
+        <button class="skipbtn" data-skip="${esc(i.k)}">不考慮這間</button></div>
+    </div>`).join('');
+
+  /* 三個名額常常被同一類別佔滿（土地在市中心又小又貴，分數幾乎贏不了透天）。
+     另一類別若完全沒上榜，補一行把它的最高分指出來，不然等於看不到。 */
+  const cats = new Set(top.map(i => i.c));
+  let other = '';
+  if (top.length && cats.size === 1) {
+    const miss = pool.find(i => !cats.has(i.c));
+    if (miss) {
+      other = `本次 ${top.length} 間都是${esc([...cats][0])}。`
+        + `${esc(miss.c)}裡最高分的是 `
+        + `<a href="${esc(miss.url)}" target="_blank" rel="noopener">${esc(miss.ti)}</a>`
+        + `（${fmt(miss.a)} 坪 ${fmt(miss.p)} 萬，離${esc(miss.s)}站 ${miss.d} 公尺，${miss.sc} 分）。`;
+    }
+  }
+
+  const n = Object.keys(SKIPS).length;
+  const note = document.getElementById('skipnote');
+  const skipTxt = n ? `已排除 ${n} 間不考慮的物件。<button id="unskip">全部復原</button>` : '';
+  note.hidden = !(other || skipTxt);
+  note.innerHTML = [other, skipTxt].filter(Boolean).join('<br>');
+}
 
 /* ---------- 明細 ---------- */
 const MQ = matchMedia('(max-width: 720px)');
@@ -764,6 +863,19 @@ document.getElementById('favclear').addEventListener('click', function () {
   FAVS = {}; saveFavs(); draw();
 });
 
+/* 「不考慮」與復原 */
+document.addEventListener('click', e => {
+  const skip = e.target.closest('.skipbtn');
+  if (skip) {
+    e.stopPropagation();
+    SKIPS[skip.dataset.skip] = Date.now();
+    saveSkips();
+    drawPicks();
+    return;
+  }
+  if (e.target.id === 'unskip') { SKIPS = {}; saveSkips(); drawPicks(); }
+});
+
 /* 手機的排序控制：卡片版沒有欄位標題可以點 */
 const msort = document.getElementById('msort'), mdir = document.getElementById('mdir');
 function syncSortUI() {
@@ -794,6 +906,7 @@ document.getElementById('more').addEventListener('click', () => {
   document.addEventListener('click', e => {
     const star = e.target.closest('.star');
     if (star) { toggleFav(star.dataset.fav); return; }        // 星星自己處理，不要開 591
+    if (e.target.closest('.skipbtn')) return;                 // 「不考慮」也不要開 591
     if (e.target.closest('a')) return;                        // 標題本來就是連結
     const row = e.target.closest('[data-url]');
     if (!row) return;
@@ -804,6 +917,7 @@ document.getElementById('more').addEventListener('click', () => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     const star = e.target.closest('.star');
     if (star) { e.preventDefault(); toggleFav(star.dataset.fav); return; }
+    if (e.target.closest('.skipbtn')) return;                 // 按鈕自己會收到 click
     const row = e.target.closest('[data-url]');
     if (!row) return;
     e.preventDefault();
@@ -811,10 +925,12 @@ document.getElementById('more').addEventListener('click', () => {
   });
 })();
 
+drawPicks();
 drawBoard();
 document.querySelector('#tbl thead th[data-k="sv"]').setAttribute('aria-sort', 'descending');
 draw();
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { drawBoard(); draw(); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { drawPicks();
+drawBoard(); draw(); });
 </script>"""
 
 

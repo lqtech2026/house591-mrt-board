@@ -24,7 +24,6 @@
     "科技大樓"
   ],
   "categories": [
-    "一樓店面",
     "土地",
     "透天"
   ],
@@ -38,8 +37,16 @@
   "merge_duplicates": true,
   "_merge_duplicates": "同一間房常被多家仲介同時刊登。true = 合併成一間(保留離站最近那筆，其餘列在「其他仲介」欄)，避免筆數與中位數失真。",
   "min_price_wan": null,
-  "max_price_wan": null,
-  "_price": "總價區間(萬元)。例如 max_price_wan 設 8000 就是只看 8000 萬以下",
+  "max_price_wan": 20000,
+  "_price": "總價區間(萬元)。目前上限 2 億。",
+  "top_picks": 3,
+  "_top_picks": "每次更新挑出幾間精選。設 0 就不挑。",
+  "pick_weights": {
+    "area": 1,
+    "value": 1,
+    "distance": 1
+  },
+  "_pick_weights": "精選排序的權重。area=坪數大、value=單價相對同類別便宜、distance=離站近。三個都 1 就是綜合平衡；想偏向某一項就把它調大。",
   "min_unit_price_wan": 10,
   "_min_unit_price_wan": "單價下限(萬/坪)。台北市不可能低於這個數，用來擋掉混進來的「店面頂讓」等非售屋物件。不想擋就設 null。",
   "request_delay_sec": 0.6,

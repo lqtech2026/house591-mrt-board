@@ -742,6 +742,7 @@ document.getElementById('more').addEventListener('click', () => {
   document.addEventListener('click', e => {
     const star = e.target.closest('.star');
     if (star) { toggleFav(star.dataset.fav); return; }        // 星星自己處理，不要開 591
+    if (e.target.closest('.skipbtn')) return;                 // 「不考慮」也不要開 591
     if (e.target.closest('a')) return;                        // 標題本來就是連結
     const row = e.target.closest('[data-url]');
     if (!row) return;
@@ -752,6 +753,7 @@ document.getElementById('more').addEventListener('click', () => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     const star = e.target.closest('.star');
     if (star) { e.preventDefault(); toggleFav(star.dataset.fav); return; }
+    if (e.target.closest('.skipbtn')) return;                 // 按鈕自己會收到 click
     const row = e.target.closest('[data-url]');
     if (!row) return;
     e.preventDefault();

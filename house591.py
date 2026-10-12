@@ -16,6 +16,7 @@ request_delay_sec)，這是自用小工具，不要拿去大量爬。
 
 import csv
 import gzip
+import hashlib
 import io
 import json
 import os
@@ -93,6 +94,13 @@ def fetch_json(params, timeout, retries):
             if attempt < retries - 1:
                 time.sleep(1.5 * (attempt + 1))
     raise RuntimeError("API 連續 %d 次失敗: %s\n  URL: %s" % (retries, last, url))
+
+
+def comma(v):
+    """1234.5 -> "1,234.5"；None -> "—" """
+    if v is None:
+        return "—"
+    return "{:,.10g}".format(v) if isinstance(v, float) and v % 1 else "{:,}".format(int(v))
 
 
 def to_num(v):
@@ -271,6 +279,9 @@ def normalise(raw, cfg):
             "刊登": h.get("refreshtime") or "",
             "聯絡人": h.get("nick_name") or h.get("linkman") or "",
             "同物件筆數": 1,
+            "評分": None,
+            "精選": "",
+            "精選理由": "",
             "開價區間": "",
             "其他仲介": "",
             "其他連結": "",
@@ -318,6 +329,93 @@ def merge_duplicates(rows):
     return merged
 
 
+def _percentile(values, v):
+    """v 在 values 裡的百分位 (0~1)。相同值取中間，避免並列時忽高忽低。"""
+    if len(values) < 2:
+        return 0.5
+    lo = sum(1 for x in values if x < v)
+    eq = sum(1 for x in values if x == v)
+    return (lo + eq / 2.0) / len(values)
+
+
+def score_picks(rows, cfg):
+    """從符合條件的物件裡挑出最適合的幾間，並寫上名次與理由。
+
+    三個面向加權平均：坪數大、單價相對便宜、離站近。
+    坪數與單價的百分位要**分類別**算 —— 土地單價 117~698、透天 41~233，
+    差一個量級，混在一起算土地會永遠墊底。站距則全池一起比，因為可直接比較。
+    """
+    n = int(cfg.get("top_picks") or 0)
+    for r in rows:                      # 先清空，重跑時才不會殘留上次的名次
+        r["精選"] = ""
+        r["精選理由"] = ""
+    if n <= 0 or not rows:
+        return []
+
+    w = cfg.get("pick_weights") or {}
+    wa = float(w.get("area", 1))
+    wv = float(w.get("value", 1))
+    wd = float(w.get("distance", 1))
+    total_w = wa + wv + wd
+    if total_w <= 0:
+        return []
+
+    by_cat = {}
+    for r in rows:
+        by_cat.setdefault(r["類別"], []).append(r)
+    dists = [r["距離(m)"] for r in rows if r["距離(m)"] is not None]
+
+    scored = []
+    for r in rows:
+        peers = by_cat[r["類別"]]
+        areas = [x["坪數"] for x in peers if x["坪數"] is not None]
+        units = [x["單價(萬/坪)"] for x in peers if x["單價(萬/坪)"] is not None]
+
+        p_area = _percentile(areas, r["坪數"]) if r["坪數"] is not None else 0.5
+        p_unit = 1 - _percentile(units, r["單價(萬/坪)"]) if r["單價(萬/坪)"] is not None else 0.5
+        p_dist = 1 - _percentile(dists, r["距離(m)"]) if r["距離(m)"] is not None else 0.5
+
+        r["評分"] = round((wa * p_area + wv * p_unit + wd * p_dist) / total_w * 100, 1)
+        scored.append((r["評分"], r, p_area, p_unit, p_dist))
+
+    scored.sort(key=lambda t: (-t[0], t[1]["距離(m)"] if t[1]["距離(m)"] is not None else 9999))
+
+    # 理由每一間都算。網頁上可以把某間標成「不考慮」讓下一名遞補，
+    # 遞補上來的那間也要有話可說。
+    for sc, r, p_area, p_unit, p_dist in scored:
+        peers = by_cat[r["類別"]]
+        units = [x["單價(萬/坪)"] for x in peers if x["單價(萬/坪)"] is not None]
+        med_u = median(units)
+        why = []
+        if p_area >= 0.6:
+            why.append("坪數 %g 坪，%s裡排前 %d%%" % (r["坪數"], r["類別"], max(1, round((1 - p_area) * 100))))
+        if med_u and r["單價(萬/坪)"] is not None and r["單價(萬/坪)"] < med_u:
+            why.append("單價比%s中位低 %d%%" % (r["類別"], round((1 - r["單價(萬/坪)"] / med_u) * 100)))
+        if r["距離(m)"] is not None and p_dist >= 0.6:
+            why.append("離%s站僅 %d 公尺" % (r["捷運站"], r["距離(m)"]))
+        if not why:
+            why.append("三項條件都在中段，綜合分數仍排前面")
+        r["精選理由"] = "；".join(why)
+
+    # 合併是靠地址比對的，寫法不同就會漏掉（例如「延平南路」vs「延平南路一段」）。
+    # 精選只有三個名額，同一間房佔兩格很浪費，這裡再用「同坪數＋同總價」擋一次。
+    picks, seen = [], set()
+    for item in scored:
+        r = item[1]
+        sig = (r["類別"], r["坪數"], r["總價(萬)"])
+        if sig in seen:
+            continue
+        seen.add(sig)
+        picks.append(item)
+        if len(picks) >= n:
+            break
+
+    for rank, (sc, r, _a, _u, _d) in enumerate(picks, 1):
+        r["精選"] = str(rank)
+
+    return [t[1] for t in picks]
+
+
 def median(values):
     vals = sorted(v for v in (to_num(x) for x in values) if v is not None)
     if not vals:
@@ -352,7 +450,31 @@ def summarise(rows, key):
 # 物件指紋的版本。改了 prop_key 的組成就把這個數字加一：
 # 舊快照的 key 會全部對不上，與其噴出一整批假的「新上架／已下架」，
 # 不如直接重建基準。
-KEY_VERSION = 2
+KEY_VERSION = 3
+
+
+def scope_fingerprint(cfg):
+    """查詢範圍的指紋。改了類別、站點、坪數、距離或價格上下限，
+    舊快照裡那些不再屬於範圍的物件會整批「消失」，若照常比對就會報出
+    幾百筆假的已下架。範圍一變就重建基準。"""
+    scope = [cfg.get(k) for k in
+             ("categories", "stations", "region_id", "min_area_ping", "max_area_ping",
+              "max_distance_m", "min_price_wan", "max_price_wan",
+              "min_unit_price_wan", "exclude_basement")]
+    return hashlib.sha1(
+        json.dumps(scope, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()[:12]
+
+
+def _floors_total(floor):
+    """樓層欄取斜線後面的「總樓層」。
+
+    斜線前面是物件自己的樓層，各家仲介寫法不一致：同一棟透天會被寫成
+    「整棟/4F」「1F~4F/4F」「1F/4F」，拿它當指紋就合併不起來。
+    斜線後面的總樓層反而一致，拿來當指紋穩定得多。
+    """
+    t = str(floor or "")
+    return t.split("/")[-1].strip() if "/" in t else t.strip()
 
 
 def prop_key(r):
@@ -360,10 +482,10 @@ def prop_key(r):
     (同一間房換仲介刊登 houseid 就變了)。"""
     tail = r.get("地址") or r.get("社區") or str(r["houseid"])
     return "|".join([r.get("行政區", ""), r.get("類別", ""),
-                     str(r.get("坪數", "")), str(r.get("樓層", "")), tail])
+                     str(r.get("坪數", "")), _floors_total(r.get("樓層")), tail])
 
 
-def diff_snapshot(rows):
+def diff_snapshot(rows, cfg=None):
     """跟上次結果比對，標出新上架 / 降價 / 已下架。
 
     591 每次回的分頁結果會些微跳動（同樣的條件，前後兩次抓到的集合會差幾筆），
@@ -376,10 +498,13 @@ def diff_snapshot(rows):
         try:
             raw = load_json(path)
             if isinstance(raw, dict) and "items" in raw:
-                if raw.get("key_version") == KEY_VERSION:
-                    store = raw
-                else:
+                scope = scope_fingerprint(cfg) if cfg else raw.get("scope")
+                if raw.get("key_version") != KEY_VERSION:
                     log("  指紋格式已更新，重建比對基準（這次不判定異動）")
+                elif raw.get("scope") != scope:
+                    log("  查詢範圍已變更，重建比對基準（這次不判定異動）")
+                else:
+                    store = raw
         except Exception:
             pass
 
@@ -436,7 +561,8 @@ def diff_snapshot(rows):
 
     os.makedirs(DATA_DIR, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump({"run": run, "key_version": KEY_VERSION, "items": items},
+        json.dump({"run": run, "key_version": KEY_VERSION,
+                   "scope": scope_fingerprint(cfg) if cfg else None, "items": items},
                   f, ensure_ascii=False)
 
     return {"first_run": first_run, "new": new_ids, "drops": drops, "gone": gone}
@@ -447,6 +573,7 @@ def diff_snapshot(rows):
 CSV_FIELDS = ["類別", "型態", "捷運站", "距離(m)", "總價(萬)", "單價(萬/坪)", "坪數",
               "主建物坪", "格局", "樓層", "屋齡", "行政區", "地址", "社區",
               "含車位", "降價", "新上架", "對比上次", "刊登", "聯絡人",
+              "評分", "精選", "精選理由",
               "同物件筆數", "開價區間", "其他仲介", "標題", "houseid", "連結", "其他連結"]
 
 
@@ -713,7 +840,8 @@ def main():
         log("沒有符合條件的物件，試著把 max_distance_m 放寬或降低 min_area_ping。")
         return 0
 
-    changes = diff_snapshot(rows)
+    changes = diff_snapshot(rows, cfg)
+    picks = score_picks(rows, cfg)
     stamp = datetime.now().strftime("%Y%m%d_%H%M")
     csv_path = write_csv(rows, stamp)
     html_path = write_html(rows, cfg, changes, stamp)
@@ -726,6 +854,20 @@ def main():
             % (s["name"], s["count"],
                "—" if s["price_median"] is None else "%g" % s["price_median"],
                "—" if s["unit_median"] is None else "%g" % s["unit_median"]))
+
+    if picks:
+        cap = cfg.get("max_price_wan")
+        log("")
+        log("今日精選 %d 間（預算 %s 萬以內，綜合坪數／單價／站距）"
+            % (len(picks), comma(cap) if cap else "不限"))
+        log("-" * 46)
+        for r in picks:
+            log("  %s. %s %s %g坪 %s萬 (%s萬/坪) 離%s站 %dm   評分 %s"
+                % (r["精選"], r["類別"], r["行政區"], r["坪數"],
+                   comma(r["總價(萬)"]), comma(r["單價(萬/坪)"]),
+                   r["捷運站"], r["距離(m)"] or 0, r["評分"]))
+            log("     %s" % r["精選理由"])
+            log("     %s" % DETAIL_URL.format(r["houseid"]))
 
     if not changes["first_run"]:
         log("\n變動：新上架 %d ｜ 降價 %d ｜ 已下架 %d"
