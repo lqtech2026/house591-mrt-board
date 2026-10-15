@@ -113,6 +113,7 @@ def build(rows, stations_ref, cfg):
             "dup": int(r.get("同物件筆數") or 1),
             "hi": _range_high(r.get("開價區間", "")),
             "sc": num(r.get("評分")),
+            "ac": r.get("坪數爭議", ""),
             "why": r.get("精選理由", ""),
             "new": r.get("新上架", ""),
             "chg": r.get("對比上次", ""),
@@ -685,7 +686,8 @@ function drawPicks() {
         ${i.d == null ? '' : i.d + ' m'} · ${esc(i.c)} · ${esc(i.dt)}</div>
       <div class="pick-ti">${esc(i.ti)}</div>
       <div class="pick-p"><b>${fmt(i.p)}</b><span>萬</span>
-        <span>${fmt(i.u)} 萬/坪 · ${fmt(i.a)} 坪</span></div>
+        <span>${fmt(i.u)} 萬/坪 · ${fmt(i.a)} 坪</span>
+        ${i.ac ? `<span class="pill down" title="評分已改用較小的坪數">${esc(i.ac)}</span>` : ''}</div>
       ${i.why ? `<div class="pick-why">${esc(i.why)}</div>` : ''}
       <div class="pick-act">${starHTML(i)}
         <button class="skipbtn" data-skip="${esc(i.k)}">不考慮這間</button></div>
@@ -749,6 +751,7 @@ function renderCards(rows) {
         <b>${fmt(i.p)}</b><span class="u">萬</span>
         ${i.hi ? `<span class="pill rng">最高 ${fmt(i.hi)}</span>` : ''}
         <span class="u">${fmt(i.u)} 萬/坪 · ${fmt(i.a)} 坪</span>
+        ${i.ac ? `<span class="pill down">坪數存疑</span>` : ''}
       </div>
       <div class="c-meta">${
         [esc(i.c) + (has(i.t) ? ' · ' + esc(i.t) : ''),
@@ -794,7 +797,8 @@ function draw(keepLimit) {
     <td class="r num">${fmt(i.p)}${
       i.hi ? `<span class="pill rng" title="另有仲介開價較高，這是同一間房">最高 ${fmt(i.hi)}</span>` : ''}</td>
     <td class="r num">${fmt(i.u)}</td>
-    <td class="r num">${fmt(i.a)}</td><td>${esc(i.fl) || '—'}</td>
+    <td class="r num">${fmt(i.a)}${
+      i.ac ? `<span class="pill down" title="${esc(i.ac)}；評分已改用較小的坪數">坪數存疑</span>` : ''}</td><td>${esc(i.fl) || '—'}</td>
     <td>${esc(i.ag) || '—'}</td><td>${esc(i.dt)}</td><td>${esc(i.ad) || '—'}</td>
     <td class="ti"><a href="${esc(i.url)}" target="_blank" rel="noopener">${esc(i.ti)}</a>${
       i.dup > 1 ? `<span class="pill">${i.dup} 家</span>` : ''}${

@@ -232,8 +232,11 @@ def normalise(raw, cfg):
     max_price = cfg.get("max_price_wan")
     min_unit = cfg.get("min_unit_price_wan")
     drop_b = cfg.get("exclude_basement", True)
-    districts = cfg.get("allowed_districts")
-    districts = set(districts) if districts else None
+    # 每站各自的行政區白名單。全域白名單擋不掉「木柵的別墅配到大安站」這種錯置，
+    # 因為文山區本來就是萬隆、公館的合理腹地。
+    sd = cfg.get("station_districts") or {}
+    station_districts = {k: set(v) for k, v in sd.items() if v}
+    dropped_district = []
 
     for h in raw.values():
         dist = to_num(h.get("distance"))
@@ -257,8 +260,12 @@ def normalise(raw, cfg):
         if drop_b and is_basement(h.get("floor")):
             continue
 
-        # 591 偶爾把無關的物件配到錯誤的捷運站，用行政區白名單擋掉
-        if districts and h.get("section_name") not in districts:
+        # 591 偶爾把無關的物件配到錯誤的捷運站，用該站的行政區白名單擋掉。
+        # 沒列到的站不過濾，避免新增站點時整站被清空。
+        stn = clean_station(h.get("distance_name"), known)
+        allowed = station_districts.get(stn)
+        if allowed and h.get("section_name") not in allowed:
+            dropped_district.append((stn, h.get("section_name"), h.get("title", "")[:24]))
             continue
 
         unit = to_num(h.get("unitprice"))
@@ -271,7 +278,7 @@ def normalise(raw, cfg):
         out.append({
             "類別": h.get("_category", ""),
             "型態": h.get("shape_name") or "",
-            "捷運站": clean_station(h.get("distance_name"), known),
+            "捷運站": stn,
             "距離(m)": int(dist) if dist is not None else None,
             "總價(萬)": tidy(price),
             "單價(萬/坪)": tidy(unit),
@@ -294,6 +301,8 @@ def normalise(raw, cfg):
             "精選理由": "",
             "開價區間": "",
             "坪數爭議": "",
+            "保守坪數": None,
+            "保守單價": None,
             "其他仲介": "",
             "其他連結": "",
             "houseid": h["houseid"],
@@ -301,9 +310,12 @@ def normalise(raw, cfg):
         })
 
     out.sort(key=lambda r: (r["捷運站"], r["距離(m)"] if r["距離(m)"] is not None else 9999))
+    if dropped_district:
+        log("  擋掉 %d 筆行政區對不上的物件（591 配錯捷運站）：" % len(dropped_district))
+        for stn, sec, title in dropped_district[:5]:
+            log("    %s站 ← %s %s" % (stn, sec, title))
+
     return out
-
-
 def merge_duplicates(rows):
     """同一間房常被好幾家仲介同時刊登，而且各家開價可能不一樣。
 
@@ -356,7 +368,8 @@ def merge_duplicates(rows):
         group.sort(key=lambda x: (x["坪數"] if x["坪數"] is not None else float("inf")))
         rep = group[0]
         areas = sorted({x["坪數"] for x in group if x["坪數"] is not None})
-        if len(areas) > 1:
+        # 跟 remember_areas 同一套門檻：差 5% 以內只是小數點進位，不算爭議
+        if len(areas) > 1 and areas[-1] > areas[0] * 1.05:
             rep["坪數爭議"] = "另有仲介登 %s 坪" % "、".join("%g" % a for a in areas[1:])
         rep["同物件筆數"] = sum(x["同物件筆數"] for x in group)
         others = [x["聯絡人"] for x in group[1:] if x["聯絡人"]]
@@ -376,6 +389,54 @@ def _percentile(values, v):
     lo = sum(1 for x in values if x < v)
     eq = sum(1 for x in values if x == v)
     return (lo + eq / 2.0) / len(values)
+
+
+def remember_areas(rows):
+    """記住同一間房被登過哪些坪數，跨次執行都算數。
+
+    同一間房被不同仲介用不同口徑登錄（一家含增建 84 坪、一家登記 35.72 坪），
+    merge_duplicates 只有在兩筆同時被抓到時才擋得掉；591 的分頁會跳動，
+    常常只抓到灌水的那筆，它就會憑著虛高的坪數與虛低的單價衝上精選。
+    這裡把看過的坪數存進快照，之後只要看過較小的值就一直記得。
+
+    不改寫 `坪數`（那是該筆刊登自己寫的，照實呈現），而是另外給一組
+    `保守坪數` / `保守單價` 供評分使用，並在 `坪數爭議` 寫明差異。
+    """
+    path = os.path.join(DATA_DIR, "areas.json")
+    mem = {}
+    if os.path.exists(path):
+        try:
+            mem = load_json(path) or {}
+        except Exception:
+            mem = {}
+
+    for r in rows:
+        addr = (r.get("地址") or "").strip()
+        if not addr or r["坪數"] is None or r["總價(萬)"] is None:
+            continue
+        key = "|".join([r["行政區"], r["類別"], addr, "%g" % r["總價(萬)"]])
+        seen = set(mem.get(key) or [])
+        seen.add(r["坪數"])
+        mem[key] = sorted(seen)
+
+    for r in rows:
+        addr = (r.get("地址") or "").strip()
+        if not addr or r["坪數"] is None or r["總價(萬)"] is None:
+            continue
+        key = "|".join([r["行政區"], r["類別"], addr, "%g" % r["總價(萬)"]])
+        seen = mem.get(key) or []
+        # 多數差異只是小數點進位(70.8 vs 70.81)，那不是爭議。
+        # 差 5% 以上才當成口徑不同(例如含增建 84 坪 vs 登記 35.72 坪)。
+        if len(seen) > 1 and max(seen) > min(seen) * 1.05:
+            small = min(seen)
+            r["保守坪數"] = small
+            r["保守單價"] = round(r["總價(萬)"] / small, 2) if small else None
+            others = [a for a in seen if a != r["坪數"]]
+            r["坪數爭議"] = "另有仲介登 %s 坪" % "、".join("%g" % a for a in others)
+
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(mem, f, ensure_ascii=False)
 
 
 def score_picks(rows, cfg):
@@ -408,11 +469,14 @@ def score_picks(rows, cfg):
     scored = []
     for r in rows:
         peers = by_cat[r["類別"]]
-        areas = [x["坪數"] for x in peers if x["坪數"] is not None]
-        units = [x["單價(萬/坪)"] for x in peers if x["單價(萬/坪)"] is not None]
+        # 坪數有爭議時一律用較保守(較小)的那個算分，灌水的坪數不該換到高分
+        ca = lambda x: x.get("保守坪數") if x.get("保守坪數") is not None else x["坪數"]
+        cu = lambda x: x.get("保守單價") if x.get("保守單價") is not None else x["單價(萬/坪)"]
+        areas = [ca(x) for x in peers if ca(x) is not None]
+        units = [cu(x) for x in peers if cu(x) is not None]
 
-        p_area = _percentile(areas, r["坪數"]) if r["坪數"] is not None else 0.5
-        p_unit = 1 - _percentile(units, r["單價(萬/坪)"]) if r["單價(萬/坪)"] is not None else 0.5
+        p_area = _percentile(areas, ca(r)) if ca(r) is not None else 0.5
+        p_unit = 1 - _percentile(units, cu(r)) if cu(r) is not None else 0.5
         p_dist = 1 - _percentile(dists, r["距離(m)"]) if r["距離(m)"] is not None else 0.5
 
         r["評分"] = round((wa * p_area + wv * p_unit + wd * p_dist) / total_w * 100, 1)
@@ -617,7 +681,7 @@ CSV_FIELDS = ["類別", "型態", "捷運站", "距離(m)", "總價(萬)", "單�
               "主建物坪", "格局", "樓層", "屋齡", "行政區", "地址", "社區",
               "含車位", "降價", "新上架", "對比上次", "刊登", "聯絡人",
               "評分", "精選", "精選理由",
-              "同物件筆數", "開價區間", "坪數爭議", "其他仲介", "標題", "houseid", "連結", "其他連結"]
+              "同物件筆數", "開價區間", "坪數爭議", "保守坪數", "保守單價", "其他仲介", "標題", "houseid", "連結", "其他連結"]
 
 
 def write_csv(rows, stamp):
@@ -884,6 +948,7 @@ def main():
         return 0
 
     changes = diff_snapshot(rows, cfg)
+    remember_areas(rows)
     picks = score_picks(rows, cfg)
     stamp = datetime.now().strftime("%Y%m%d_%H%M")
     csv_path = write_csv(rows, stamp)
